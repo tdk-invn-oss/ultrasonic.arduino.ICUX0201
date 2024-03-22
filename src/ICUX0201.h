@@ -41,11 +41,12 @@ public:
   /*!
    * @brief Class constructor.
    * @param spi_ref Reference of the SPI to be used
+   * @param freq SPI clock frequency to be used
    * @param cs_id Pin ID to be used for the SPI
    * @param int1_id ID of the interrupt 1 pin
    */
-  ICUX0201(SPIClass &spi_ref, uint8_t cs_id, uint8_t int1_id, uint8_t int2_id,
-           uint8_t mutclk_id);
+  ICUX0201(SPIClass &spi_ref, uint32_t freq, uint8_t cs_id, uint8_t int1_id,
+           uint8_t int2_id, uint8_t mutclk_id);
   /*!
    * @brief Class constructor.
    * @param spi_ref Reference of the SPI to be used
@@ -170,13 +171,14 @@ public:
   /*!
    * @brief Class constructor.
    * @param spi_ref Reference of the SPI to be used
+   * @param freq SPI clock frequency to be used
    * @param cs_id Pin ID to be used for the SPI
    * @param int1_id ID of the interrupt 1 pin
    * @param int2_id ID of the interrupt 2 pin
    * @param mutclk_id ID of the MUTCLK pin
    */
-   ICUX0201_GeneralPurpose(SPIClass &spi_ref, uint8_t cs_id, uint8_t int1_id,
-                          uint8_t int2_id, uint8_t mutclk_id);
+   ICUX0201_GeneralPurpose(SPIClass &spi_ref, uint32_t freq, uint8_t cs_id,
+                          uint8_t int1_id, uint8_t int2_id, uint8_t mutclk_id);
   /*!
    * @brief Class constructor.
    * @param spi_ref Reference of the SPI to be used
@@ -205,13 +207,14 @@ public:
   /*!
    * @brief Class constructor.
    * @param spi_ref Reference of the SPI to be used
+   * @param freq SPI clock frequency to be used
    * @param cs_id Pin ID to be used for the SPI
    * @param int1_id ID of the interrupt 1 pin
    * @param int2_id ID of the interrupt 2 pin
    * @param mutclk_id ID of the MUTCLK pin
    */
-  ICUX0201_Presence(SPIClass &spi_ref, uint8_t cs_id, uint8_t int1_id,
-                    uint8_t int2_id, uint8_t mutclk_id);
+  ICUX0201_Presence(SPIClass &spi_ref, uint32_t freq, uint8_t cs_id,
+                    uint8_t int1_id, uint8_t int2_id, uint8_t mutclk_id);
   /*!
    * @brief Class constructor.
    * @param spi_ref Reference of the SPI to be used

@@ -21,10 +21,14 @@
 
 #include "board/chbsp_chirp.h"
 
-// spi
-static SPIClass *spi = NULL;
-static uint8_t chip_select_id = 0;
-static bool is_measure_ready = false;
+#define SEG_TYPE_TO_STR(segment_type)                                                                                  \
+  (segment_type == CH_MEAS_SEG_TYPE_COUNT)                                                                           \
+      ? "Count"                                                                                                  \
+      : ((segment_type == CH_MEAS_SEG_TYPE_RX)                                                                   \
+                     ? "RX   "                                                                                       \
+                     : ((segment_type == CH_MEAS_SEG_TYPE_TX)                                                        \
+                                ? "TX   "                                                                            \
+                                : ((segment_type == CH_MEAS_SEG_TYPE_EOF) ? "EOF  " : "UNKNOWN")))
 
 /* Configuration of measurement segments
  * The following symbols define the individual transmit and receive segments
@@ -45,6 +49,11 @@ static bool is_measure_ready = false;
 #define CHIRP_RX_SEG_1_ATTEN (0) /* no attenuation */
 #define CHIRP_RX_SEG_1_INT_EN (1) /* generate interrupt when done (if eligible) */
 
+// spi
+static SPIClass *spi = NULL;
+static uint8_t chip_select_id = 0;
+static bool is_measure_ready = false;
+
 /* Measurement configuration struct - starting/default values */
 static ch_meas_config_t meas_config_init = {
     .odr = CH_ODR_FREQ_DIV_8,
@@ -59,16 +68,16 @@ static void sensor_int_callback(ch_group_t *grp_ptr, uint8_t dev_num,
 }
 
 // ICUX0201 constructor for spi interface
-ICUX0201::ICUX0201(SPIClass &spi_ref, uint8_t cs_id, uint8_t int1_id,
-                   uint8_t int2_id, uint8_t mutclk_id) {
-  chbsp_module_init(spi_ref, cs_id, int1_id, int2_id, mutclk_id);
+ICUX0201::ICUX0201(SPIClass &spi_ref, uint32_t freq, uint8_t cs_id,
+                   uint8_t int1_id, uint8_t int2_id, uint8_t mutclk_id) {
+  chbsp_module_init(spi_ref, freq, cs_id, int1_id, int2_id, mutclk_id);
   this->fw_init_func = icu_init_init; /* define a default firmware to use */
   this->fw_sensor_init_func = NULL;
 }
 
 // ICUX0201 constructor for spi interface
 ICUX0201::ICUX0201(SPIClass &spi_ref, uint8_t cs_id, uint8_t int1_id) {
-  chbsp_module_init(spi_ref, cs_id, int1_id, UNUSED_PIN, UNUSED_PIN);
+  chbsp_module_init(spi_ref, DEFAULT_SPI_CLOCK, cs_id, int1_id, UNUSED_PIN, UNUSED_PIN);
   this->fw_init_func = icu_init_init; /* define a default firmware to use */
   this->fw_sensor_init_func = NULL;
 }
@@ -93,12 +102,12 @@ int ICUX0201::begin() {
 }
 
 uint16_t ICUX0201::get_max_range(void) {
-  return ch_samples_to_mm(&chirp_device, ch_get_max_samples(&chirp_device));
+  return ch_meas_samples_to_mm(&chirp_device, 0, ch_get_max_samples(&chirp_device));
 };
 
 uint16_t ICUX0201::get_measure_range(void) {
-  uint16_t nb_samples = ch_get_num_samples(&chirp_device);
-  return ch_samples_to_mm(&chirp_device, nb_samples);
+  uint16_t nb_samples = ch_meas_get_num_samples(&chirp_device, 0);
+  return ch_meas_samples_to_mm(&chirp_device, 0, nb_samples);
 };
 
 /**
@@ -154,7 +163,7 @@ int ICUX0201::free_run(uint16_t range_mm, uint16_t interval_ms) {
   rc = configure_measure(range_mm);
 
   if (rc == 0) {
-    rc = ch_set_freerun_interval(&chirp_device, interval_ms);
+    rc = ch_meas_set_interval(&this->chirp_device, 0, interval_ms);
   }
   if (rc == 0) {
     rc = ch_meas_write_config(&chirp_device);
@@ -224,11 +233,87 @@ void ICUX0201::print_configuration(HardwareSerial &serial) {
   serial.println("Sensor configuration");
   serial.print("    measure range (mm): ");
   serial.println(get_measure_range());
+
+#if (ICUX0201_DEBUG == 1)
+  /* Print the measure queues */
+  ch_meas_info_t meas_info;
+  ch_meas_seg_info_t seg_info;
+  uint8_t dev_num = this->chirp_device.io_index;
+
+  serial.println("");
+
+  for (uint8_t meas_num = 0; meas_num < MEAS_QUEUE_MAX_MEAS; meas_num++) {
+    ch_meas_get_info(&this->chirp_device, meas_num, &meas_info);
+
+    if (meas_info.num_segments == 0)
+      continue;
+
+    serial.print("<ICUX0201> Device ");
+    serial.print(dev_num);
+    serial.print(" - Measurement Queue ");
+    serial.print(meas_num);
+    serial.println(" : ");
+
+    serial.print("      Total samples = ");
+    serial.print(meas_info.num_rx_samples);
+    serial.print(" (");
+    serial.print(ch_samples_to_mm(&this->chirp_device, meas_info.num_rx_samples));
+    serial.println(" mm)");
+
+    serial.print("      Active Segments = ");
+    serial.print(meas_info.num_segments);
+    serial.print("    CIC ODR = ");
+    serial.println(meas_info.odr);
+
+    for (int seg_num = 0; seg_num <= meas_info.num_segments; seg_num++) { /* also display EOF */
+      ch_meas_get_seg_info(&(this->chirp_device), meas_num, seg_num, &seg_info);
+      serial.print("      Seg ");
+      serial.print(seg_num);
+      serial.print("  ");
+      serial.print(SEG_TYPE_TO_STR(seg_info.type));
+      if (seg_info.type == CH_MEAS_SEG_TYPE_EOF) {
+        serial.println("");
+        continue;
+      } else {
+        serial.print(" ");
+      }
+      if (seg_info.type == CH_MEAS_SEG_TYPE_RX) {
+        serial.print(seg_info.num_rx_samples);
+        serial.print(" sample(s) ");
+      } else {
+        serial.print("            ");
+      }
+      serial.print(seg_info.num_cycles);
+      serial.print(" cycles ");
+      if (seg_info.type == CH_MEAS_SEG_TYPE_TX) {
+        serial.print("Pulse width = ");
+        serial.print(seg_info.tx_pulse_width);
+        serial.print("  Phase = ");
+        serial.print(seg_info.tx_phase);
+        serial.print("  ");
+      } else if (seg_info.type == CH_MEAS_SEG_TYPE_RX) {
+        serial.print("Gain reduce = ");
+        serial.print(seg_info.rx_gain);
+        serial.print("  Atten = ");
+        serial.print(seg_info.rx_atten);
+        serial.print("  ");
+      }
+      if (seg_info.rdy_int_en) {
+        serial.print("Rdy Int  ");
+      }
+      if (seg_info.done_int_en) {
+        serial.print("Done Int");
+      }
+      serial.println("");
+    }
+    serial.println("");
+  }
+#endif /* ICUX0201_DEBUG == 1 */
 }
 
 uint8_t ICUX0201::get_iq_data(ch_iq_sample_t (&iq_data)[ICU_MAX_NUM_SAMPLES], uint16_t& nb_samples)
 {
-  nb_samples  = ch_get_num_samples(&chirp_device);
+  nb_samples  = ch_meas_get_num_samples(&chirp_device, 0);
 
   /* Reading I/Q data in normal, blocking mode */
   uint8_t err = ch_get_iq_data(&chirp_device, iq_data, 0, nb_samples,

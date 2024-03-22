@@ -48,10 +48,10 @@ static ch_meas_config_t meas_config_presence = {
     .meas_period = 0, /* will be set later */
 };
 
-ICUX0201_Presence::ICUX0201_Presence(SPIClass &spi_ref, uint8_t cs_id,
-                                     uint8_t int1_id, uint8_t int2_id,
-                                     uint8_t mutclk_id)
-    : ICUX0201(spi_ref, cs_id, int1_id, int2_id, mutclk_id) {
+ICUX0201_Presence::ICUX0201_Presence(SPIClass &spi_ref, uint32_t freq,
+                                     uint8_t cs_id, uint8_t int1_id,
+                                     uint8_t int2_id, uint8_t mutclk_id)
+    : ICUX0201(spi_ref, freq, cs_id, int1_id, int2_id, mutclk_id) {
   this->fw_init_func = icu_presence_init;
   this->fw_sensor_init_func = icu_init_no_txopt_init;
 }
@@ -65,7 +65,6 @@ ICUX0201_Presence::ICUX0201_Presence(SPIClass &spi_ref, uint8_t cs_id,
 
 int ICUX0201_Presence::configure_measure(uint16_t range_mm) {
   int rc = 0;
-  uint16_t nb_samples    = 0;
   uint16_t range_samples;
 
   if (range_mm == 0) {
@@ -91,7 +90,7 @@ int ICUX0201_Presence::configure_measure(uint16_t range_mm) {
       rc = ch_meas_import(&this->chirp_device, &sensor_settings_icu30201, NULL); /* algo will be initialized later */
       /* Change last receive segment to reflect custom defined range */
       if (!rc) {
-          rc = ch_meas_set_num_samples(&this->chirp_device, CH_DEFAULT_MEAS_NUM, nb_samples);
+          rc = ch_meas_set_num_samples(&this->chirp_device, CH_DEFAULT_MEAS_NUM, range_samples);
       }
     } else {
       rc |= ch_meas_init(&this->chirp_device, 0, &meas_config_presence, NULL);
@@ -113,9 +112,8 @@ int ICUX0201_Presence::init_sensor_algorithm() {
   int rc;
   IcuPresenceSensorConfig sensor_config;
   IcuPresenceUserConfig user_config;
-  uint16_t nb_range_samples = ch_get_num_samples(&this->chirp_device);
+  uint16_t nb_range_samples = ch_meas_get_num_samples(&this->chirp_device, 0);
 
-  nb_range_samples = ch_get_num_samples(&this->chirp_device);
   if (nb_range_samples > ICU_PRESENCE_MAX_IQ_SAMPLES) {
     nb_range_samples = ICU_PRESENCE_MAX_IQ_SAMPLES;
   }
@@ -144,6 +142,11 @@ int ICUX0201_Presence::free_run(void) {
   } else {
     default_range = icu20201_default_range_mm;
   }
+  #if (ICUX0201_DEBUG == 1)
+    Serial.print("<ICUX0201> free_run auto range = ");
+    Serial.print(default_range);
+    Serial.println(" mm");
+#endif
   return free_run(default_range);
 }
 
@@ -157,7 +160,7 @@ int ICUX0201_Presence::free_run(uint16_t range_mm, uint16_t interval_ms) {
   rc = configure_measure(range_mm);
 
   if (rc == 0) {
-    rc = ch_set_freerun_interval(&this->chirp_device, interval_ms);
+    rc = ch_meas_set_interval(&this->chirp_device, 0, interval_ms);
     rc |= ch_freerun_time_hop_disable(&this->chirp_device);
   }
 
@@ -183,6 +186,7 @@ int ICUX0201_Presence::free_run(uint16_t range_mm, uint16_t interval_ms) {
     chbsp_set_int1_dir_in(&this->chirp_device);
     chbsp_int1_interrupt_enable(&this->chirp_device); // enable interrupt
   }
+
   return rc;
 }
 

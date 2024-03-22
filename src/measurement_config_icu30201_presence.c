@@ -20,7 +20,7 @@
 #define ULTRASOUND_CIC_ODR (ICU_PRESENCE_RECOMMENDED_CIC_ODR)
 
 measurement_queue_t sensor_settings_icu30201 = {
-    .intconfig= INTCONFIG_ON_TARGET,
+    .intconfig= 0, /* get all measure results even when no detection */
     .meas_start=0,
     .meas_stop=0,
     .current_meas=0,

@@ -26,8 +26,8 @@
 
 #define CHBSP_RTC_CAL_PULSE_MS       (100)
 
-#define SPI_CLOCK 11000000
 static SPIClass *spi = NULL;
+static uint32_t spi_freq = DEFAULT_SPI_CLOCK;
 
 static uint8_t cs_pin_id;
 static uint8_t int1_pin_id;
@@ -83,13 +83,17 @@ static void int2_handler(void)
   /* Not implemented */
 }
 
-void chbsp_module_init(SPIClass &spi_ref, uint8_t cs_id,uint8_t int1_id, uint8_t int2_id, uint8_t mutclk_id)
+void chbsp_module_init(SPIClass &spi_ref, uint32_t freq, uint8_t cs_id,uint8_t int1_id, uint8_t int2_id, uint8_t mutclk_id)
 {
   spi = &spi_ref;
   cs_pin_id = cs_id;
   int1_pin_id = int1_id;
   int2_pin_id = int2_id;
   mutclk_pin_id = mutclk_id;
+  if((freq < MAX_SPI_CLOCK)&&(freq >= 100000))
+  {
+    spi_freq = freq;
+  }
 }
 
 void chbsp_board_init(ch_group_t *grp_ptr)
@@ -196,7 +200,7 @@ void chbsp_int2_interrupt_disable(ch_dev_t __attribute__((unused)) *dev_ptr)
 void chbsp_spi_cs_on(ch_dev_t *dev_ptr)
 {
   noInterrupts();
-  spi->beginTransaction(SPISettings(SPI_CLOCK, MSBFIRST, SPI_MODE3));
+  spi->beginTransaction(SPISettings(spi_freq, MSBFIRST, SPI_MODE3));
   digitalWrite(cs_pin_id,LOW);
 }
 

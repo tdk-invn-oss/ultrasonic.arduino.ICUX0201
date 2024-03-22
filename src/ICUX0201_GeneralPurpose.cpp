@@ -141,11 +141,11 @@ int ICUX0201_GeneralPurpose::configure_measure(uint16_t range_mm) {
 }
 
 // ICUX0201 constructor for spi interface
-ICUX0201_GeneralPurpose::ICUX0201_GeneralPurpose(SPIClass &spi_ref,
+ICUX0201_GeneralPurpose::ICUX0201_GeneralPurpose(SPIClass &spi_ref, uint32_t freq,
                                                  uint8_t cs_id, uint8_t int1_id,
                                                  uint8_t int2_id,
                                                  uint8_t mutclk_id)
-    : ICUX0201(spi_ref, cs_id, int1_id, int2_id, mutclk_id) {
+    : ICUX0201(spi_ref, freq, cs_id, int1_id, int2_id, mutclk_id) {
   this->fw_init_func = icu_gpt_init;
 }
 
@@ -160,7 +160,7 @@ float ICUX0201_GeneralPurpose::get_range(void) {
   uint32_t range_q5;
 
   if (data_ready()) {
-    range_q5 = ch_get_range(&chirp_device, CH_RANGE_ECHO_ONE_WAY);
+    range_q5 = ch_get_target_range(&chirp_device, 0, CH_RANGE_ECHO_ONE_WAY);
     if (range_q5 != CH_NO_TARGET) {
       /* Display single detected target (if any) */
       range_mm = range_q5 / 32.0;
