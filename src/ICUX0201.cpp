@@ -21,304 +21,215 @@
 
 #include "board/chbsp_chirp.h"
 
-#define SEG_TYPE_TO_STR(segment_type)                                                                                  \
-  (segment_type == CH_MEAS_SEG_TYPE_COUNT)                                                                           \
-      ? "Count"                                                                                                  \
-      : ((segment_type == CH_MEAS_SEG_TYPE_RX)                                                                   \
-                     ? "RX   "                                                                                       \
-                     : ((segment_type == CH_MEAS_SEG_TYPE_TX)                                                        \
-                                ? "TX   "                                                                            \
-                                : ((segment_type == CH_MEAS_SEG_TYPE_EOF) ? "EOF  " : "UNKNOWN")))
-
-/* Configuration of measurement segments
- * The following symbols define the individual transmit and receive segments
- * within the measurement.
- */
-#define CHIRP_TX_SEG_CYCLES (640) /* Transmit segment - length (cycles) */
-#define CHIRP_TX_SEG_PULSE_WIDTH (3) /* width of each cycle pulse */
-#define CHIRP_TX_SEG_PHASE (8) /* tx phase */
-#define CHIRP_TX_SEG_INT_EN (0) /* no interrupt when done */
-
-#define CHIRP_RX_SEG_0_SAMPLES (1) /* Receive segment 0 - single sample */
-#define CHIRP_RX_SEG_0_GAIN_REDUCE (24) /* reduce gain */
-#define CHIRP_RX_SEG_0_ATTEN (1) /* use attenuation */
-#define CHIRP_RX_SEG_0_INT_EN (0) /* no interrupt when done */
-
-/* CHIRP_RX_SEG_1_SAMPLES defined at runtime depending on range */
-#define CHIRP_RX_SEG_1_GAIN_REDUCE (0) /* no gain reduction */
-#define CHIRP_RX_SEG_1_ATTEN (0) /* no attenuation */
-#define CHIRP_RX_SEG_1_INT_EN (1) /* generate interrupt when done (if eligible) */
-
-// spi
-static SPIClass *spi = NULL;
-static uint8_t chip_select_id = 0;
-static bool is_measure_ready = false;
-
-/* Measurement configuration struct - starting/default values */
-static ch_meas_config_t meas_config_init = {
-    .odr = CH_ODR_FREQ_DIV_8,
-    .meas_period = 0,
-};
+#define RTC_CAL_PULSE_MS (100)
+#define MIN_RANGE_DIFF 150
 
 static void sensor_int_callback(ch_group_t *grp_ptr, uint8_t dev_num,
                                 ch_interrupt_type_t int_type) {
   if (int_type == CH_INTERRUPT_TYPE_DATA_RDY) {
-    is_measure_ready = true;
+    ((ICUX0201*)grp_ptr)->get_device(dev_num)->set_data_ready();
   }
 }
 
 // ICUX0201 constructor for spi interface
-ICUX0201::ICUX0201(SPIClass &spi_ref, uint32_t freq, uint8_t cs_id,
-                   uint8_t int1_id, uint8_t int2_id, uint8_t mutclk_id) {
-  chbsp_module_init(spi_ref, freq, cs_id, int1_id, int2_id, mutclk_id);
-  this->fw_init_func = icu_init_init; /* define a default firmware to use */
-  this->fw_sensor_init_func = NULL;
+ICUX0201::ICUX0201(SPIClass &spi_ref, uint32_t freq, int cs_id,
+                   int int1_id, int int2_id, int mutclk_id) {
+  device[0] = new ICUX0201_dev(spi_ref,freq,cs_id,int1_id, int2_id, mutclk_id);
+  num_ports = 1;
 }
 
 // ICUX0201 constructor for spi interface
-ICUX0201::ICUX0201(SPIClass &spi_ref, uint8_t cs_id, uint8_t int1_id) {
-  chbsp_module_init(spi_ref, DEFAULT_SPI_CLOCK, cs_id, int1_id, UNUSED_PIN, UNUSED_PIN);
-  this->fw_init_func = icu_init_init; /* define a default firmware to use */
-  this->fw_sensor_init_func = NULL;
+ICUX0201::ICUX0201(ICUX0201_dev* dev0,ICUX0201_dev* dev1) {
+  num_ports = 0;
+  if(dev0 != NULL)
+  {
+    device[0] = dev0;
+    num_ports++;
+  }
+  if(dev1 != NULL)
+  {
+    device[1] = dev1;
+    num_ports++;
+  }
+}
+
+ICUX0201_dev* ICUX0201::get_device(int id)
+{
+  if (id < num_ports)
+  {
+    return (ICUX0201_dev*)device[id];
+  }
+  return NULL;
 }
 
 /* Initialize hardware and ICU sensor */
 int ICUX0201::begin() {
   uint8_t rc = 0;
-  chbsp_board_init(&chirp_group);
-  /* TODO: make the firmware init mutable */
-  rc |= ch_init(&chirp_device, &chirp_group, 0, this->fw_init_func);
-  if (this->fw_sensor_init_func != NULL) {
-    rc |= ch_set_init_firmware(&chirp_device, this->fw_sensor_init_func);
+  
+  board_init(this);
+
+   /* Initialize group descriptor */
+  rc = ch_group_init(this, num_ports, 1 , RTC_CAL_PULSE_MS);
+  
+  for(int i =0; i< num_ports; i++)
+  {
+    get_device(i)->begin(this,i);
   }
+  
+  /* TODO: make the firmware init mutable */
   if (rc == 0) {
-    rc = ch_group_start(&chirp_group);
+    rc = ch_group_start(this);
   }
   if (rc == 0) {
     /* Register callback function to be called when Chirp sensor interrupts */
-    ch_io_int_callback_set(&chirp_group, sensor_int_callback);
+    ch_io_int_callback_set(this, sensor_int_callback);
   }
   return rc;
 }
 
-uint16_t ICUX0201::get_max_range(void) {
-  return ch_meas_samples_to_mm(&chirp_device, 0, ch_get_max_samples(&chirp_device));
+uint16_t ICUX0201::get_max_range(int sensor_id) {
+  return get_device(sensor_id)->get_max_range();
 };
 
-uint16_t ICUX0201::get_measure_range(void) {
-  uint16_t nb_samples = ch_meas_get_num_samples(&chirp_device, 0);
-  return ch_meas_samples_to_mm(&chirp_device, 0, nb_samples);
+uint16_t ICUX0201::get_measure_range(int sensor_id) {
+  return get_device(sensor_id)->get_measure_range();
 };
 
-/**
- * @brief      Configure a tx rx measure (using icu_init firmware)
- *
- * @param[in]  range_mm  The range in millimeters
- *
- * @return     0 if sensor configured !=0 otherwise
- */
-int ICUX0201::configure_measure(uint16_t range_mm) {
-  int rc = 0;
-  uint16_t range_samples;
-
-  if (range_mm == 0) {
-    /* get max range from sensor maximum range */
-    range_mm = get_max_range();
-  }
-
-  rc = ch_meas_init(&chirp_device, 0, &meas_config_init, NULL);
-  if (rc == 0) {
-    rc = ch_meas_add_segment_tx(&chirp_device, 0, CHIRP_TX_SEG_CYCLES,
-                                CHIRP_TX_SEG_PULSE_WIDTH, CHIRP_TX_SEG_PHASE,
-                                CHIRP_TX_SEG_INT_EN);
-  }
-  if (rc == 0) {
-    rc = ch_meas_add_segment_rx(&chirp_device, 0, CHIRP_RX_SEG_0_SAMPLES,
-                                CHIRP_RX_SEG_0_GAIN_REDUCE, CHIRP_RX_SEG_0_ATTEN,
-                                CHIRP_RX_SEG_0_INT_EN);
-  }
-  /* convert the range in mm to samples (which is the unit used by the sensor)
-   */
-  if (rc == 0) {
-    range_samples = ch_meas_mm_to_samples(&chirp_device, 0, range_mm);
-    rc = ch_meas_add_segment_rx(&chirp_device, 0, range_samples,
-                                CHIRP_RX_SEG_1_GAIN_REDUCE, CHIRP_RX_SEG_1_ATTEN,
-                                CHIRP_RX_SEG_1_INT_EN);
-  }
-  if (rc == 0) {
-    rc = ch_meas_write_config(&chirp_device);
-  }
-  return rc;
-}
-
-int ICUX0201::free_run(void) { return free_run(get_max_range()); }
+int ICUX0201::free_run(void) { return get_device(0)->free_run(); }
 
 int ICUX0201::free_run(uint16_t range_mm) {
-  return free_run(range_mm, default_odr_ms);
+  return get_device(0)->free_run(range_mm);
 }
 
 int ICUX0201::free_run(uint16_t range_mm, uint16_t interval_ms) {
-  int rc;
+  return get_device(0)->free_run(range_mm,interval_ms);
+}
 
-  rc = configure_measure(range_mm);
+bool ICUX0201::data_ready(int sensor_id) { return get_device(sensor_id)->data_ready(); }
 
-  if (rc == 0) {
-    rc = ch_meas_set_interval(&this->chirp_device, 0, interval_ms);
+uint16_t ICUX0201::part_number(int sensor_id) {
+  return get_device(sensor_id)->part_number();
+}
+
+const char *ICUX0201::sensor_id(int sensor_id) {
+  return get_device(sensor_id)->sensor_id();
+}
+
+uint32_t ICUX0201::frequency(int sensor_id) { return get_device(sensor_id)->frequency(); }
+
+uint16_t ICUX0201::bandwidth(int sensor_id) { return get_device(sensor_id)->bandwidth(); }
+
+uint16_t ICUX0201::rtc_cal(int sensor_id) {
+  return get_device(sensor_id)->rtc_cal();
+}
+
+uint16_t ICUX0201::rtc_cal_pulse_length(int sensor_id) {
+  return get_device(sensor_id)->rtc_cal_pulse_length();
+}
+
+float ICUX0201::cpu_freq(int sensor_id) {
+  return get_device(sensor_id)->cpu_freq();
+}
+const char *ICUX0201::fw_version(int sensor_id) {
+  return get_device(sensor_id)->fw_version();
+}
+
+void ICUX0201::print_informations(void) {
+  for(int i=0; i<num_ports;i++)
+  {
+    get_device(i)->print_informations();
   }
-  if (rc == 0) {
-    rc = ch_meas_write_config(&chirp_device);
+}
+
+void ICUX0201::print_configuration(void) {
+  for(int i=0; i<num_ports;i++)
+  {
+    get_device(i)->print_configuration();
   }
-  if (rc == 0) {
-    chbsp_set_int1_dir_in(&chirp_device);
-    chbsp_int1_interrupt_enable(&chirp_device); // enable interrupt
-    rc = ch_set_mode(&chirp_device, CH_MODE_FREERUN);
-  }
-  return rc;
-}
-
-bool ICUX0201::data_ready(void) { return is_measure_ready; }
-
-void ICUX0201::clear_data_ready(void) { is_measure_ready = false; }
-
-uint16_t ICUX0201::part_number(void) {
-  return ch_get_part_number(&chirp_device);
-}
-
-const char *ICUX0201::sensor_id(void) {
-  return ch_get_sensor_id(&chirp_device);
-}
-
-uint32_t ICUX0201::frequency(void) { return ch_get_frequency(&chirp_device); }
-
-uint16_t ICUX0201::bandwidth(void) { return ch_get_bandwidth(&chirp_device); }
-
-uint16_t ICUX0201::rtc_cal(void) {
-  return ch_get_rtc_cal_result(&chirp_device);
-}
-
-uint16_t ICUX0201::rtc_cal_pulse_length(void) {
-  return ch_get_rtc_cal_pulselength(&chirp_device);
-}
-
-float ICUX0201::cpu_freq(void) {
-  return ch_get_cpu_frequency(&chirp_device) / 1000000.0f;
-}
-const char *ICUX0201::fw_version(void) {
-  return ch_get_fw_version_string(&chirp_device);
-}
-
-void ICUX0201::print_informations(HardwareSerial &serial) {
-  serial.println("Sensor informations");
-  serial.print("    Type: ");
-  serial.println(part_number());
-  serial.print("    ID: ");
-  serial.println(sensor_id());
-  serial.print("    Operating Frequency (Hz): ");
-  serial.println(frequency());
-  serial.print("    Bandwidth (Hz): ");
-  serial.println(bandwidth());
-  serial.print("    RTC Cal (lsb @ ms): ");
-  serial.print(rtc_cal());
-  serial.print("@");
-  serial.println(rtc_cal_pulse_length());
-  serial.print("    CPU Freq (MHz): ");
-  serial.println(cpu_freq());
-  serial.print("    max range (mm): ");
-  serial.println(get_max_range());
-  serial.print("    Firmware: ");
-  serial.println(fw_version());
-}
-
-void ICUX0201::print_configuration(HardwareSerial &serial) {
-  serial.println("Sensor configuration");
-  serial.print("    measure range (mm): ");
-  serial.println(get_measure_range());
-
-#if (ICUX0201_DEBUG == 1)
-  /* Print the measure queues */
-  ch_meas_info_t meas_info;
-  ch_meas_seg_info_t seg_info;
-  uint8_t dev_num = this->chirp_device.io_index;
-
-  serial.println("");
-
-  for (uint8_t meas_num = 0; meas_num < MEAS_QUEUE_MAX_MEAS; meas_num++) {
-    ch_meas_get_info(&this->chirp_device, meas_num, &meas_info);
-
-    if (meas_info.num_segments == 0)
-      continue;
-
-    serial.print("<ICUX0201> Device ");
-    serial.print(dev_num);
-    serial.print(" - Measurement Queue ");
-    serial.print(meas_num);
-    serial.println(" : ");
-
-    serial.print("      Total samples = ");
-    serial.print(meas_info.num_rx_samples);
-    serial.print(" (");
-    serial.print(ch_samples_to_mm(&this->chirp_device, meas_info.num_rx_samples));
-    serial.println(" mm)");
-
-    serial.print("      Active Segments = ");
-    serial.print(meas_info.num_segments);
-    serial.print("    CIC ODR = ");
-    serial.println(meas_info.odr);
-
-    for (int seg_num = 0; seg_num <= meas_info.num_segments; seg_num++) { /* also display EOF */
-      ch_meas_get_seg_info(&(this->chirp_device), meas_num, seg_num, &seg_info);
-      serial.print("      Seg ");
-      serial.print(seg_num);
-      serial.print("  ");
-      serial.print(SEG_TYPE_TO_STR(seg_info.type));
-      if (seg_info.type == CH_MEAS_SEG_TYPE_EOF) {
-        serial.println("");
-        continue;
-      } else {
-        serial.print(" ");
-      }
-      if (seg_info.type == CH_MEAS_SEG_TYPE_RX) {
-        serial.print(seg_info.num_rx_samples);
-        serial.print(" sample(s) ");
-      } else {
-        serial.print("            ");
-      }
-      serial.print(seg_info.num_cycles);
-      serial.print(" cycles ");
-      if (seg_info.type == CH_MEAS_SEG_TYPE_TX) {
-        serial.print("Pulse width = ");
-        serial.print(seg_info.tx_pulse_width);
-        serial.print("  Phase = ");
-        serial.print(seg_info.tx_phase);
-        serial.print("  ");
-      } else if (seg_info.type == CH_MEAS_SEG_TYPE_RX) {
-        serial.print("Gain reduce = ");
-        serial.print(seg_info.rx_gain);
-        serial.print("  Atten = ");
-        serial.print(seg_info.rx_atten);
-        serial.print("  ");
-      }
-      if (seg_info.rdy_int_en) {
-        serial.print("Rdy Int  ");
-      }
-      if (seg_info.done_int_en) {
-        serial.print("Done Int");
-      }
-      serial.println("");
-    }
-    serial.println("");
-  }
-#endif /* ICUX0201_DEBUG == 1 */
 }
 
 uint8_t ICUX0201::get_iq_data(ch_iq_sample_t (&iq_data)[ICU_MAX_NUM_SAMPLES], uint16_t& nb_samples)
 {
-  nb_samples  = ch_meas_get_num_samples(&chirp_device, 0);
+  return get_iq_data(0,iq_data,nb_samples);
+}
 
-  /* Reading I/Q data in normal, blocking mode */
-  uint8_t err = ch_get_iq_data(&chirp_device, iq_data, 0, nb_samples,
-                        CH_IO_MODE_BLOCK);
-  clear_data_ready();
+uint8_t ICUX0201::get_iq_data(int sensor_id, ch_iq_sample_t (&iq_data)[ICU_MAX_NUM_SAMPLES], uint16_t& nb_samples)
+{
+  return get_device(sensor_id)->get_iq_data(iq_data,nb_samples);
+}
 
-  return err;
+
+// ICUX0201 constructor for spi interface
+ICUX0201_GeneralPurpose::ICUX0201_GeneralPurpose(ICUX0201_dev_GeneralPurpose& dev0,ICUX0201_dev_GeneralPurpose& dev1) {
+  device[0] = &dev0;
+  device[1] = &dev1;
+  num_ports = 2;
+}
+
+int ICUX0201_GeneralPurpose::start_trigger(uint16_t range_mm) {
+  int rc = 0;
+  uint16_t range1_mm = range_mm;
+  if(num_ports > 1)
+  {
+    uint32_t sensors_mean_fop;
+    // When using 2 sensors, manage ranges to avoid both sensor to compute algo at the same time
+    uint16_t max_range = get_max_range();
+    if(range_mm == 0)
+    {
+      range_mm = max_range - (MIN_RANGE_DIFF);
+      range1_mm = max_range;
+    } else if( (range_mm + (MIN_RANGE_DIFF)) < max_range )
+    {
+      range1_mm = range_mm + (MIN_RANGE_DIFF);
+    } else  {
+      range_mm = max_range - (MIN_RANGE_DIFF);
+      range1_mm = max_range;
+    }
+    sensors_mean_fop = (ch_get_frequency(get_device(0)) + ch_get_frequency(get_device(1)))/2;
+    rc |= ch_set_frequency(get_device(0), sensors_mean_fop);
+    rc |= ch_set_frequency(get_device(1), sensors_mean_fop);
+    rc |= get_device(1)->start_trigger(range1_mm,CH_MODE_TRIGGERED_RX_ONLY);
+  }
+  rc |= get_device(0)->start_trigger(range_mm,CH_MODE_TRIGGERED_TX_RX);
+  return rc;
+}
+
+void ICUX0201_GeneralPurpose::trig(void) {
+  return ch_group_trigger(this);
+}
+
+int ICUX0201_GeneralPurpose::triangulate(const float distance_between_sensors_mm, float& x, float& y, float offset)
+{
+  int rc = 0;
+  float range0_mm = get_range(0);
+  float range1_mm = get_range(1);
+  float diff_mm;
+
+  if ((range0_mm == 0)||(range1_mm == 0)||(range1_mm<=range0_mm))
+  {
+    /* One of the sensor losts the target */
+    return -1;
+  }
+  /* Remove transmit distance to the 2nd sensor distance */
+  range1_mm -= range0_mm + offset;
+
+  
+  diff_mm = (range0_mm > range1_mm) ? (range0_mm - range1_mm) : (range1_mm - range0_mm);
+  if(diff_mm > distance_between_sensors_mm)
+  {
+    /* This is not supposed to happen geometrically */
+    return -2;
+  }
+  x =  (range0_mm*range0_mm - range1_mm*range1_mm) / (2*distance_between_sensors_mm);
+
+  y = distance_between_sensors_mm/2 +x;
+  y = (range0_mm-y)*(range0_mm + y);
+  if(y>0)
+  {
+    y = sqrt(y);
+  } else {
+    y = 0;
+    return -3;
+  }
+  return 0;
 }

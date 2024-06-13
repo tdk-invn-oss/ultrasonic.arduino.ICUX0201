@@ -1,8 +1,26 @@
-#include <invn/soniclib/ch_rangefinder.h>
+/*! \file ch_rangefinder.c
+ *
+ * \brief Chirp SonicLib API range finding function implementations
+ */
+
+/*
+ Copyright 2016-2024, InvenSense, Inc.  All rights reserved.
+
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ DISCLAIMED.
+
+ */
+#define CH_LOG_MODULE_NAME "CH_RANGEFINDER"
+#include <invn/soniclib/ch_log.h>
+
 #include <invn/soniclib/details/ch_common.h>
 #if defined(INCLUDE_SHASTA_SUPPORT)
 #include <invn/soniclib/sensor_fw/icu_gpt/icu_gpt.h>
 #endif
+#include <invn/soniclib/ch_rangefinder_types.h>
+#include <invn/soniclib/ch_rangefinder.h>
 
 #if defined(INCLUDE_WHITNEY_SUPPORT)
 const uint8_t THRESH_LEN_REGS[CHX01_COMMON_NUM_THRESHOLDS] = {
@@ -36,7 +54,7 @@ uint8_t ch_rangefinder_set_static_range(ch_dev_t *dev_ptr, uint16_t num_samples)
 #endif
 	} else if (dev_ptr->asic_gen == CH_ASIC_GEN_2_SHASTA) {
 #ifdef INCLUDE_SHASTA_SUPPORT
-		ret_val = ch_meas_set_static_filter(dev_ptr, CH_DEFAULT_MEAS_NUM, num_samples);
+		ret_val = icu_gpt_set_static_filter(dev_ptr, CH_DEFAULT_MEAS_NUM, num_samples);
 #else
 		(void)num_samples;
 #endif  // INCLUDE_SHASTA_SUPPORT
@@ -118,7 +136,7 @@ uint8_t ch_rangefinder_set_thresholds(ch_dev_t *dev_ptr, ch_thresholds_t *lib_th
 		return RET_ERR;
 	}
 
-	return ch_meas_set_thresholds(dev_ptr, CH_DEFAULT_MEAS_NUM, lib_thresh_buf_ptr);
+	return icu_gpt_set_thresholds(dev_ptr, CH_DEFAULT_MEAS_NUM, lib_thresh_buf_ptr);
 #elif defined(INCLUDE_WHITNEY_SUPPORT)
 	uint16_t start_sample = 0;
 	uint8_t ret_val       = RET_OK;
@@ -166,7 +184,7 @@ uint8_t ch_rangefinder_get_thresholds(ch_dev_t *dev_ptr, ch_thresholds_t *lib_th
 	}
 
 #ifdef INCLUDE_SHASTA_SUPPORT
-	return ch_meas_get_thresholds(dev_ptr, CH_DEFAULT_MEAS_NUM, lib_thresh_buf_ptr);
+	return icu_gpt_get_thresholds(dev_ptr, CH_DEFAULT_MEAS_NUM, lib_thresh_buf_ptr);
 #elif defined(INCLUDE_WHITNEY_SUPPORT)
 	uint8_t thresh_len_reg = 0;  // offset of register for this threshold's length
 	uint8_t thresh_len     = 0;  // number of samples described by each threshold
@@ -199,7 +217,7 @@ uint8_t ch_rangefinder_get_thresholds(ch_dev_t *dev_ptr, ch_thresholds_t *lib_th
 
 uint8_t ch_rangefinder_set_rx_holdoff(ch_dev_t *dev_ptr, uint16_t num_samples) {
 #ifdef INCLUDE_SHASTA_SUPPORT
-	return ch_meas_set_rx_holdoff(dev_ptr, CH_DEFAULT_MEAS_NUM, num_samples);
+	return icu_gpt_set_rx_holdoff(dev_ptr, CH_DEFAULT_MEAS_NUM, num_samples);
 #elif defined(INCLUDE_WHITNEY_SUPPORT)
 	uint16_t reg_value;
 	uint8_t rx_holdoff_reg;
@@ -223,7 +241,7 @@ uint8_t ch_rangefinder_set_rx_holdoff(ch_dev_t *dev_ptr, uint16_t num_samples) {
 uint16_t ch_rangefinder_get_rx_holdoff(ch_dev_t *dev_ptr) {
 
 #if defined(INCLUDE_SHASTA_SUPPORT)
-	return ch_meas_get_rx_holdoff(dev_ptr, CH_DEFAULT_MEAS_NUM);
+	return icu_gpt_get_rx_holdoff(dev_ptr, CH_DEFAULT_MEAS_NUM);
 #elif defined(INCLUDE_WHITNEY_SUPPORT)
 	uint16_t rx_holdoff = 0;
 	uint8_t rx_holdoff_reg;
@@ -369,6 +387,15 @@ uint32_t ch_get_target_tof_us(ch_dev_t *dev_ptr, uint8_t target_num) {
 #endif
 }
 
+uint8_t ch_is_target_in_ringdown(ch_dev_t *dev_ptr) {
+#if defined(INCLUDE_SHASTA_SUPPORT)
+	return icu_gpt_algo_is_target_in_ringdown(dev_ptr);
+#else
+	(void)dev_ptr;
+	return 0;
+#endif
+}
+
 uint8_t ch_set_threshold(ch_dev_t *dev_ptr, uint8_t threshold_index, uint16_t amplitude) {
 	uint8_t ret_val                              = RET_ERR;
 	const ch_rangefinder_api_funcs_t *algo_funcs = dev_ptr->current_fw->api_funcs->algo_specific_api;
@@ -435,7 +462,7 @@ uint8_t ch_rangefinder_display_config_info(ch_dev_t *dev_ptr) {
 	ch_err = ch_rangefinder_get_algo_config(dev_ptr, &algo_config);
 	/* Display static target rejection range, if used */
 	if (algo_config.static_range != 0) {
-		printf("static_range=%u samples\r\n", algo_config.static_range);
+		ch_log_printf("static_range=%u samples\r\n", algo_config.static_range);
 	}
 #endif
 
@@ -443,33 +470,33 @@ uint8_t ch_rangefinder_display_config_info(ch_dev_t *dev_ptr) {
 		goto exit_print_cr;
 	}
 
+#ifdef INCLUDE_WHITNEY_SUPPORT
 	/* Get threshold values in structure */
 	ch_thresholds_t detect_thresholds;
+
 	ch_err = ch_get_thresholds(dev_ptr, &detect_thresholds);
 	if (ch_err) {
 		/*error reading thresholds or thresholds not handled by fw */
 		goto exit_print_cr;
 	}
 
-	printf("\r\n  Detection thresholds:\r\n");
+	ch_log_printf("Detection thresholds:\r\n");
 	for (int thresh_num = 0; thresh_num < dev_ptr->current_fw->max_num_thresholds; thresh_num++) {
 		uint16_t start_sample = detect_thresholds.threshold[thresh_num].start_sample;
-		uint16_t start_mm     = ch_samples_to_mm(dev_ptr, start_sample);
+		uint16_t start_mm     = ch_common_samples_to_mm(dev_ptr, start_sample);
 
 		if ((thresh_num == 0) || (start_sample != 0)) { /* unused thresholds have start = 0 */
-			printf("     %u\tstart sample: %3u  = %4u mm\tlevel: %u", thresh_num, start_sample, start_mm,
-			       detect_thresholds.threshold[thresh_num].level);
-#ifdef INCLUDE_SHASTA_SUPPORT
-			if (detect_thresholds.threshold[thresh_num].level == CH_THRESH_LEVEL_HOLDOFF) {
-				printf(" (Rx Holdoff)");
-			}
-#endif  // INCLUDE_SHASTA_SUPPORT
-			printf("\r\n");
+			ch_log_printf("     %u\tstart sample: %3u  = %4u mm\tlevel: %u", thresh_num, start_sample, start_mm,
+			              detect_thresholds.threshold[thresh_num].level);
+			ch_log_printf("\r\n");
 		}
 	}
+#elif defined(INCLUDE_SHASTA_SUPPORT)
+	icu_gpt_display_algo_thresholds(dev_ptr);
+#endif
 
 exit_print_cr:
-	printf("\r\n");
+	ch_log_printf("\r\n");
 
 	return ch_err;
 }

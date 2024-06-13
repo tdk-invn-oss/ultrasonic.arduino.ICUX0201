@@ -14,16 +14,17 @@
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  */
- #include <invn/soniclib/chirp_bsp.h>
-
 #ifndef CHBSP_CHIRP_H
 #define CHBSP_CHIRP_H
+
+#include <invn/soniclib/soniclib.h>
+#include <invn/soniclib/chirp_bsp.h>
 
 #define UNUSED_PIN (0xFF)
 #define DEFAULT_SPI_CLOCK 11000000
 #define MAX_SPI_CLOCK 13000000
 
-void chbsp_module_init(SPIClass &spi_ref, uint32_t freq, uint8_t cs_id,uint8_t int1_id, uint8_t int2_id, uint8_t mutclk_id);
 
+void board_init(ch_group_t *grp_ptr);
 
 #endif

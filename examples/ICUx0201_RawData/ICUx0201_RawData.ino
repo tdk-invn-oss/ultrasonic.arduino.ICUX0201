@@ -35,17 +35,17 @@ void setup() {
     while (1)
       ;
   } else {
-    ICU.print_informations(Serial);
+    ICU.print_informations();
   }
-  // Start ICU in free run mode
-  ret = ICU.free_run();
+  // Start ICU in free run mode (max range, interval 250ms)
+  ret = ICU.free_run(ICU.get_max_range(),250);
   if (ret != 0) {
     Serial.print("ICUx0201 free run failed: ");
     Serial.println(ret);
     while (1)
       ;
   } else {
-    ICU.print_configuration(Serial);
+    ICU.print_configuration();
   }
 }
 

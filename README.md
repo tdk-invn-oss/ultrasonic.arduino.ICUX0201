@@ -15,19 +15,30 @@ The below wiring description is given for an Arduino Zero board:
 
 |Arduino Zero|Ultrasonic ToF EVK board|
 | --- | --- |
-| 3V3        | J5.1           |
-| 5V         | J10.19         |
-| GND        | J5.3           |
-| MISO=SPI.1 | J5.11          |
-| MOSI=SPI.4 | J5.9           |
-| SCK=SPI.3  | J5.5           |
-| CS=DIG.10  | J5.12          |
-| INT1=DIG.2 | J5.8           |
+| 3V3          | J5.1           |
+| 5V           | J10.19         |
+| GND          | J5.3           |
+| MISO=SPI.1   | J5.11          |
+| MOSI=SPI.4   | J5.9           |
+| SCK=SPI.3    | J5.5           |
+| CS0=DIG.10   | J5.12          |
+| INT1_0=DIG.2 | J5.8           |
 
 Note: SPI Chip Select can be mapped on any free digital IO, updating the sketches accordingly.
       INT1 interrupt line can be mapped on any free interruptable IO, updating the sketches accordingly.
 
 The ICU-x0201 sensor module must be connected with a flex to the J3 connector (Device 0 port).
+
+## Adding a second sensor
+
+This library includes a triangulation sketche requiring 2 ICU10201 sensors.
+The second ICU10201 sensor module must be connected with a flex to the J4 connector (Device 1 port).  
+Other additional signals are required:
+
+|Arduino Zero|Ultrasonic ToF EVK board|
+| --- | --- |
+| CS1=DIG.9    | J5.16          |
+| INT1_1=DIG.3 | J5.2           |
 
 # Library API
 
@@ -162,6 +173,79 @@ Serial.print("Presence:");
 Serial.println(presence);
 ```
 
+## Using 2 sensors
+
+**ICUX0201_dev_GeneralPurpose(SPIClass &spi_ref, int cs_id, int int1_id)**
+
+This method creates an instance of ICUx0201 device with General Purpose firmware, using provided SPI instance and chip select, and specified pin for interrupt.
+
+```C++
+ICUX0201_dev_GeneralPurpose dev0(Wire, CHIRP_DEVICE0_I2C_ADDR, 2, 8, 10);
+```
+
+**ICUX0201_GeneralPurpose(ICUX0201_dev_GeneralPurpose& dev0,ICUX0201_dev_GeneralPurpose& dev1)**
+
+This method creates a group of ICUx0201 devices with dev0 & dev1.  
+In order to work together, ICUx0201 devices must be part of a sensor group.
+
+```C++
+ICUX0201_dev_GeneralPurpose dev0(SPI, 10, 2);
+ICUX0201_dev_GeneralPurpose dev1(SPI, 9, 3);
+ICUX0201_GeneralPurpose ICU(dev0,dev1);
+```
+
+**int start_trigger(uint16_t range_mm)**
+
+When using multiple ICUX0201 sensors, they must be synchronized to work together.
+This method starts first sensor as "emitter and receiver" and second sensor as "receiver only".
+Measurements will be triggered using the interrupt pins.
+A max range could be specified in mm (default is max range).
+
+```C++
+ICU.start_trigger(500);
+```
+
+**void trig(void)**
+
+This method is used to trigger a measurement for a group of ICUX0201 sensors.
+
+```C++
+ICU.trig();
+```
+
+**bool data_ready(int sensor_id=0)**
+
+The function returns true if a measure is available for the specified sensor id, false if not.
+
+```C++
+if(ICU.data_ready(0)&&ICU.data_ready(1))
+{
+    Serial.println("A measure has completed");
+}
+````
+
+**int triangulate(const float distance_between_sensors_mm, float& x, float& y, float offset=0)**
+
+This method is used to compute the plane triangulation of a target using ICU10201 measurements.
+To get a valid triangulation using this method, ICU10201 sensors must be placed at a certain distance and must be "looking" into the same direction.
+The distance between the sensors must be specified as an input, *x* and *y* are the triangulation ouputs.
+The *x* output corresponds to the target "left-right" position, while *y* corresponds to the distance of the object.
+The method returns negative value if the triangulation computation is impossible (no target or multiple targets detected,...), 0 otherwise.
+A distance offset might be specified in case measured sensor ranges are not aligned.
+
+```C++
+float x,y;
+if(ICU.triangulate(DISTANCE_BETWEEN_SENSORS_MM,x,y)==0)
+{
+  Serial.print("X:");
+  Serial.println(x);
+  Serial.print(" Y:");
+  Serial.println(y);
+}
+```
+
+![Triangulation](doc/pictures/triangulation.jpg)
+
 # Available Sketches
 
 **ICUx0201_TargetDetection**
@@ -180,3 +264,10 @@ Presence flag and target range are printed on the Serial monitor, and can be plo
 **ICUx0201_RawData**
 
 This sketch initializes an ICUx0201, and starts the Time-of-Flight in free run mode. For each sample, the raw I/Q data is printed on the Serial monitor.
+
+**ICU10201_Triangulation**
+
+This sketch initializes a group of two ICU10201 sensors, and starts the triangulation. For each sample, X and Y target coordinates are printed on the Serial monitor.
+
+![Triangulation plot](doc/pictures/triangulation_plotter.jpg)
+

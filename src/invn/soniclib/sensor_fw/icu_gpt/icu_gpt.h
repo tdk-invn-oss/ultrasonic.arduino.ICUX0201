@@ -29,11 +29,8 @@ extern "C" {
 
 #include <stdint.h>
 #include <invn/soniclib/details/icu.h>
-#include <invn/soniclib/sensor_fw/icu_gpt/icu_algo_format.h>
-#include <invn/soniclib/sensor_fw/icu_gpt/icu_shasta_algo_structs.h>
-#include <invn/soniclib/sensor_fw/icu_gpt/icu_rangefinder_interface.h>
-#include <invn/soniclib/sensor_fw/icu_gpt/shasta_gpt_interface.h>
-#include <invn/soniclib/ch_rangefinder.h>
+#include <invn/icu_interface/ch-rangefinder/structs.h>
+#include <invn/soniclib/ch_rangefinder_types.h>
 #include <invn/soniclib/soniclib.h>
 
 #define ICU_GPT_MAX_SAMPLES    (IQ_SAMPLES_MAX)
@@ -277,6 +274,24 @@ uint32_t icu_gpt_algo_get_target_range(ch_dev_t *dev_ptr, uint8_t target_num, ch
  */
 uint8_t icu_gpt_algo_set_data_output(ch_dev_t *dev_ptr, const ch_output_t *output_ptr);
 
+/**
+ * @brief      Return if a target is detected near sensor (in the ringdown)
+ *
+ * @param      dev_ptr  pointer to the ch_dev_t descriptor structure
+ *
+ * @return     1 if a target is detected, else 0
+ */
+uint8_t icu_gpt_algo_is_target_in_ringdown(ch_dev_t *dev_ptr);
+
+/**
+ * @brief      Display GPT thresholds for debug purpose.
+ *
+ * @param      dev_ptr  pointer to the ch_dev_t descriptor structure
+ *
+ * @return     RET_OK if print of thresholds succeeded
+ */
+uint8_t icu_gpt_display_algo_thresholds(ch_dev_t *dev_ptr);
+
 /*!
  * \brief Set the max number of reported target ranges for a measurement.
  *
@@ -297,9 +312,9 @@ uint8_t icu_gpt_algo_set_data_output(ch_dev_t *dev_ptr, const ch_output_t *outpu
  * exceed the applicable threshold value, the sensor will report range (and amplitude)
  * values for each.
  *
- * See also \a ch_get_target_range(), \a ch_get_target_amplitude(), \a ch_meas_get_num_ranges().
+ * See also \a ch_get_target_range(), \a ch_get_target_amplitude(), \a icu_gpt_get_num_ranges().
  */
-uint8_t ch_meas_set_num_ranges(ch_dev_t *dev_ptr, uint8_t meas_num, uint8_t num_ranges);
+uint8_t icu_gpt_set_num_ranges(ch_dev_t *dev_ptr, uint8_t meas_num, uint8_t num_ranges);
 
 /*!
  * \brief Get the max number of reported target ranges for a measurement.
@@ -311,7 +326,7 @@ uint8_t ch_meas_set_num_ranges(ch_dev_t *dev_ptr, uint8_t meas_num, uint8_t num_
  * This function returns the maximum number of separate target range values that the
  * sensor will report in a single measurement.
  */
-uint8_t ch_meas_get_num_ranges(ch_dev_t *dev_ptr, uint8_t meas_num);
+uint8_t icu_gpt_get_num_ranges(ch_dev_t *dev_ptr, uint8_t meas_num);
 
 /*!
  * \brief Set the number of ringdown cancellation samples for a measurement.
@@ -336,9 +351,9 @@ uint8_t ch_meas_get_num_ranges(ch_dev_t *dev_ptr, uint8_t meas_num);
  * If the ringdown cancel sample count is too low, it will result in false detections at
  * very close indicated ranges.
  *
- * See also \a ch_meas_get_ringdown_cancel(), \a ch_meas_init().
+ * See also \a icu_gpt_get_ringdown_cancel()
  */
-uint8_t ch_meas_set_ringdown_cancel(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_t num_samples);
+uint8_t icu_gpt_set_ringdown_cancel(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_t num_samples);
 
 /*!
  * \brief Get the number of ringdown cancellation samples for a measurement.
@@ -352,9 +367,9 @@ uint8_t ch_meas_set_ringdown_cancel(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_
  * cancellation" processing.  These samples are always the first in the measurement (corresponding
  * to targets closest to the sensor).
  *
- * See also \a ch_meas_set_ringdown_cancel().
+ * See also \a icu_gpt_set_ringdown_cancel().
  */
-uint16_t ch_meas_get_ringdown_cancel(ch_dev_t *dev_ptr, uint8_t meas_num);
+uint16_t icu_gpt_get_ringdown_cancel(ch_dev_t *dev_ptr, uint8_t meas_num);
 
 /*!
  * \brief Set detection thresholds for a specific measurement.
@@ -383,11 +398,11 @@ uint16_t ch_meas_get_ringdown_cancel(ch_dev_t *dev_ptr, uint8_t meas_num);
  * The \a ch_set_thresholds() function performs the same operation for the default
  * measurement (same as setting \a meas_num to CH_DEFAULT_MEAS_NUM).
  *
- * See also \a ch_set_thresholds(), \a ch_meas_get_thresholds().
+ * See also \a ch_set_thresholds(), \a icu_gpt_get_thresholds().
  *
  * \note This function is only available for ICU sensors.
  */
-uint8_t ch_meas_set_thresholds(ch_dev_t *dev_ptr, uint8_t meas_num, const ch_thresholds_t *lib_thresh_buf_ptr);
+uint8_t icu_gpt_set_thresholds(ch_dev_t *dev_ptr, uint8_t meas_num, const ch_thresholds_t *lib_thresh_buf_ptr);
 
 /*!
  * \brief Get detection thresholds for a specific measurement.
@@ -411,7 +426,7 @@ uint8_t ch_meas_set_thresholds(ch_dev_t *dev_ptr, uint8_t meas_num, const ch_thr
  *
  * \note This function is only available for ICU sensors.
  */
-uint8_t ch_meas_get_thresholds(ch_dev_t *dev_ptr, uint8_t meas_num, ch_thresholds_t *lib_thresh_buf_ptr);
+uint8_t icu_gpt_get_thresholds(ch_dev_t *dev_ptr, uint8_t meas_num, ch_thresholds_t *lib_thresh_buf_ptr);
 
 /*!
  * \brief Set the number of static target filter samples for a measurement.
@@ -433,9 +448,9 @@ uint8_t ch_meas_get_thresholds(ch_dev_t *dev_ptr, uint8_t meas_num, ch_threshold
  * The \a ch_set_static_range() function performs the same operation for the default
  * measurement (same as setting \a meas_num to CH_DEFAULT_MEAS_NUM).
  *
- * See also \a ch_meas_get_static_filter(), \a ch_meas_init().
+ * See also \a icu_gpt_get_static_filter()
  */
-uint8_t ch_meas_set_static_filter(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_t num_samples);
+uint8_t icu_gpt_set_static_filter(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_t num_samples);
 
 /*!
  * \brief Get the number of static target filter samples for a measurement.
@@ -456,9 +471,9 @@ uint8_t ch_meas_set_static_filter(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_t 
  * The \a ch_get_static_filter() function performs the same operation for the default
  * measurement (same as setting \a meas_num to CH_DEFAULT_MEAS_NUM).
  *
- * See also \a ch_meas_set_static_filter().
+ * See also \a icu_gpt_set_static_filter().
  */
-uint16_t ch_meas_get_static_filter(ch_dev_t *dev_ptr, uint8_t meas_num);
+uint16_t icu_gpt_get_static_filter(ch_dev_t *dev_ptr, uint8_t meas_num);
 
 /*!
  * \brief Set the receive holdoff sample count for a specific measurement.
@@ -479,9 +494,9 @@ uint16_t ch_meas_get_static_filter(ch_dev_t *dev_ptr, uint8_t meas_num);
  * The \a ch_set_rx_holdoff() function performs the same operation for the default
  * measurement (same as setting \a meas_num to CH_DEFAULT_MEAS_NUM).
  *
- * See also \a ch_meas_get_rx_holdoff().
+ * See also \a icu_gpt_get_rx_holdoff().
  */
-uint8_t ch_meas_set_rx_holdoff(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_t num_samples);
+uint8_t icu_gpt_set_rx_holdoff(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_t num_samples);
 
 /*!
  * \brief Get the receive holdoff sample count for a specific measurement.
@@ -493,16 +508,16 @@ uint8_t ch_meas_set_rx_holdoff(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_t num
  *
  * This function gets the receive (rx) holdoff sample count for the specified measurement.
  * The rx holdoff count is the number of samples at the beginning of a measurement that will
- * be ignored for the purpose of detecting a target, as previously set by \a ch_meas_set_rx_holdoff().
+ * be ignored for the purpose of detecting a target, as previously set by \a icu_gpt_set_rx_holdoff().
  *
  * To convert the returned sample count to a physical distance, use \a ch_samples_to_mm().
  *
  * The \a ch_get_rx_holdoff() function performs the same operation for the default
  * measurement (same as setting \a meas_num to CH_DEFAULT_MEAS_NUM).
  *
- * See also \a ch_meas_set_rx_holdoff().
+ * See also \a icu_gpt_set_rx_holdoff().
  */
-uint16_t ch_meas_get_rx_holdoff(ch_dev_t *dev_ptr, uint8_t meas_num);
+uint16_t icu_gpt_get_rx_holdoff(ch_dev_t *dev_ptr, uint8_t meas_num);
 
 /*!
  * \brief Set the filter update interval for a measurement.
@@ -518,9 +533,9 @@ uint16_t ch_meas_get_rx_holdoff(ch_dev_t *dev_ptr, uint8_t meas_num);
  * update the filters during every measurement.  A value of 1 will update every
  * second measurement, a value of 2 will update every third measurement, etc.
  *
- * See also \a ch_meas_get_filter_update(), \a ch_meas_init().
+ * See also \a icu_gpt_get_filter_update().
  */
-uint8_t ch_meas_set_filter_update(ch_dev_t *dev_ptr, uint8_t meas_num, uint8_t update_interval);
+uint8_t icu_gpt_set_filter_update(ch_dev_t *dev_ptr, uint8_t meas_num, uint8_t update_interval);
 
 /*!
  * \brief Get the filter update interval for a measurement.
@@ -534,9 +549,9 @@ uint8_t ch_meas_set_filter_update(ch_dev_t *dev_ptr, uint8_t meas_num, uint8_t u
  * 0 will update the filters during every measurement.  A value of 1 will update every
  * second measurement, a value of 2 will update every third measurement, etc.
  *
- * See also \a ch_meas_set_filter_update().
+ * See also \a icu_gpt_set_filter_update().
  */
-uint8_t ch_meas_get_filter_update(ch_dev_t *dev_ptr, uint8_t meas_num);
+uint8_t icu_gpt_get_filter_update(ch_dev_t *dev_ptr, uint8_t meas_num);
 
 #ifdef __cplusplus
 }

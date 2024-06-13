@@ -18,8 +18,11 @@
  DISCLAIMED.
 
  */
+#define CH_LOG_MODULE_NAME "ICU_GPT"
+#include <invn/soniclib/ch_log.h>
 
 #include "icu_gpt.h"
+#include <invn/soniclib/ch_rangefinder_types.h>
 #include <invn/soniclib/details/ch_common.h>
 
 #define ICU_DEVICES_NUM (3)
@@ -46,23 +49,57 @@ static uint32_t get_tof_us(ch_dev_t *dev_ptr) {
 	return icu_gpt_algo_get_target_tof_us(dev_ptr, CH_DEFAULT_TARGET_NUM);
 }
 
+static uint8_t set_thresholds(ch_dev_t *dev_ptr, ch_thresholds_t *lib_thresh_buf_ptr) {
+	if (!dev_ptr->sensor_connected || dev_ptr->asic_gen != CH_ASIC_GEN_2_SHASTA) {
+		return RET_ERR;
+	}
+
+	return icu_gpt_set_thresholds(dev_ptr, CH_DEFAULT_MEAS_NUM, lib_thresh_buf_ptr);
+}
+
+static uint8_t get_thresholds(ch_dev_t *dev_ptr, ch_thresholds_t *lib_thresh_buf_ptr) {
+	if (!dev_ptr->sensor_connected || (lib_thresh_buf_ptr == NULL)) {
+		return RET_ERR;
+	}
+
+	return icu_gpt_get_thresholds(dev_ptr, CH_DEFAULT_MEAS_NUM, lib_thresh_buf_ptr);
+}
+
+static uint8_t set_rx_holdoff(ch_dev_t *dev_ptr, uint16_t num_samples) {
+	return icu_gpt_set_rx_holdoff(dev_ptr, CH_DEFAULT_MEAS_NUM, num_samples);
+}
+
+static uint16_t get_rx_holdoff(ch_dev_t *dev_ptr) {
+	return icu_gpt_get_rx_holdoff(dev_ptr, CH_DEFAULT_MEAS_NUM);
+}
+
+static uint8_t set_static_range(ch_dev_t *dev_ptr, uint16_t num_samples) {
+	if (!dev_ptr->sensor_connected || dev_ptr->asic_gen != CH_ASIC_GEN_2_SHASTA) {
+		return RET_ERR;
+	}
+
+	return icu_gpt_set_static_filter(dev_ptr, CH_DEFAULT_MEAS_NUM, num_samples);
+}
+
+static uint32_t get_range(ch_dev_t *dev_ptr, ch_range_t range_type) {
+	return icu_gpt_algo_get_target_range(dev_ptr, CH_DEFAULT_TARGET_NUM, range_type);
+}
+
 static const ch_rangefinder_api_funcs_t algo_api_funcs = {
-		.set_thresholds   = ch_rangefinder_set_thresholds,
-		.get_thresholds   = ch_rangefinder_get_thresholds,
-		.set_static_range = ch_rangefinder_set_static_range,
-		.set_rx_holdoff   = ch_rangefinder_set_rx_holdoff,
-		.get_rx_holdoff   = ch_rangefinder_get_rx_holdoff,
+		.set_thresholds   = set_thresholds,
+		.get_thresholds   = get_thresholds,
+		.set_static_range = set_static_range,
+		.set_rx_holdoff   = set_rx_holdoff,
+		.get_rx_holdoff   = get_rx_holdoff,
 		.get_tof_us       = get_tof_us,
 };
 
 static const ch_api_funcs_t api_funcs = {
 		.set_num_samples      = ch_common_set_num_samples,
-		.set_max_range        = ch_common_set_max_range,
-		.get_range            = ch_rangefinder_get_range,
+		.get_range            = get_range,
 		.get_amplitude        = get_amplitude,
 		.get_iq_data          = ch_common_get_iq_data,
 		.get_amplitude_data   = ch_common_get_amplitude_data,
-		.samples_to_mm        = ch_common_samples_to_mm,
 		.mm_to_samples        = ch_common_mm_to_samples,
 		.set_data_output      = icu_gpt_algo_set_data_output,
 		.set_target_interrupt = ch_common_set_target_interrupt,
@@ -178,10 +215,10 @@ static uint8_t get_n_delay_cic(const ch_dev_t *dev_ptr, int8_t *n_delay_cic) {
 		break;
 	}
 	}
-#ifdef CHDRV_DEBUG
-	printf(" ODR = %d, PNum: %d, PIdx: %d, OIdx: %d, cic_delay: %d ", odr_out, dev_ptr->part_number, part_idx,
-	       odr_out - 2, (uint8_t)num_delay_cic[part_idx][odr_out - 2]);
-#endif
+
+	CH_LOG_TRACE_MSG(" ODR = %d, PNum: %d, PIdx: %d, OIdx: %d, cic_delay: %d ", odr_out, dev_ptr->part_number, part_idx,
+	                 odr_out - 2, (uint8_t)num_delay_cic[part_idx][odr_out - 2]);
+
 	*n_delay_cic = num_delay_cic[part_idx][odr_out - CH_ODR_FREQ_DIV_32];
 	return RET_OK;
 }
@@ -239,8 +276,6 @@ uint8_t icu_gpt_algo_configure(ch_dev_t *dev_ptr, uint8_t meas_num, const icu_gp
                                const ch_thresholds_t *lib_thresh_ptr) {
 	InvnAlgoRangeFinderConfig *algo_cfg_ptr   = (InvnAlgoRangeFinderConfig *)(dev_ptr->algo_cfg_ptr);
 	InvnAlgoRangeFinderMeasConfig *config_ptr = &(algo_cfg_ptr->meas_cfg[meas_num]);
-	// thresholds_t *sens_thresh_ptr =
-	// 		(volatile thresholds_t *)&(config_ptr->thresholds);  // thresholds converted to sensor format
 
 	config_ptr->ringdown_cancel_samples = algo_config_ptr->ringdown_cancel_samples;  // TODO use zero for default ??
 	config_ptr->static_target_samples   = algo_config_ptr->static_filter_samples;
@@ -281,11 +316,19 @@ void icu_gpt_algo_reset(ch_dev_t *dev_ptr, uint8_t meas_num) {
 }
 
 ch_output_type_t icu_gpt_algo_get_iq_output(ch_dev_t *dev_ptr, uint8_t meas_num) {
-
+	if (dev_ptr->algo_cfg_ptr == NULL) {
+		/* Algo not configured, the default format of raw data is IQ */
+		return CH_OUTPUT_IQ;
+	}
 	return ((InvnAlgoRangeFinderConfig *)(dev_ptr->algo_cfg_ptr))->meas_cfg[meas_num].iq_output_format;
 }
 
 uint8_t icu_gpt_algo_set_iq_output(ch_dev_t *dev_ptr, uint8_t meas_num, ch_output_type_t output_format) {
+	if (dev_ptr->algo_cfg_ptr == NULL) {
+		/* Algo not configured, can't change raw data format */
+		return RET_ERR;
+	}
+
 	((InvnAlgoRangeFinderConfig *)(dev_ptr->algo_cfg_ptr))->meas_cfg[meas_num].iq_output_format =
 			(uint8_t)output_format;
 
@@ -293,8 +336,9 @@ uint8_t icu_gpt_algo_set_iq_output(ch_dev_t *dev_ptr, uint8_t meas_num, ch_outpu
 }
 
 uint8_t icu_gpt_algo_get_num_targets(ch_dev_t *dev_ptr) {
-	uint8_t num_valid_targets                  = 0; /* default value in case of read error */
-	ICU_ALGO_SHASTA_OUTPUT *sens_algo_out_addr = (ICU_ALGO_SHASTA_OUTPUT *)(uintptr_t)dev_ptr->algo_info.algo_out_ptr;
+	uint8_t num_valid_targets = 0; /* default value in case of read error */
+	InvnAlgoRangeFinderOutput *sens_algo_out_addr =
+			(InvnAlgoRangeFinderOutput *)(uintptr_t)dev_ptr->algo_info.algo_out_ptr;
 
 	uint16_t num_targets_addr = (uint16_t)(uintptr_t) & (sens_algo_out_addr->tL.num_valid_targets);
 
@@ -304,9 +348,10 @@ uint8_t icu_gpt_algo_get_num_targets(ch_dev_t *dev_ptr) {
 }
 
 uint16_t icu_gpt_algo_get_target_amplitude(ch_dev_t *dev_ptr, uint8_t target_num) {
-	uint16_t amplitude                         = 0;
-	uint16_t amplitude_reg                     = 0;
-	ICU_ALGO_SHASTA_OUTPUT *sens_algo_out_addr = (ICU_ALGO_SHASTA_OUTPUT *)(uintptr_t)dev_ptr->algo_info.algo_out_ptr;
+	uint16_t amplitude     = 0;
+	uint16_t amplitude_reg = 0;
+	InvnAlgoRangeFinderOutput *sens_algo_out_addr =
+			(InvnAlgoRangeFinderOutput *)(uintptr_t)dev_ptr->algo_info.algo_out_ptr;
 
 	if (!dev_ptr->sensor_connected || (dev_ptr->asic_gen == CH_ASIC_GEN_1_WHITNEY)) {
 		return 0;
@@ -336,24 +381,17 @@ uint32_t icu_gpt_algo_get_target_range(ch_dev_t *dev_ptr, uint8_t target_num, ch
 		err = 1;
 	}
 
-#ifdef CHDRV_DEBUG
-	uint8_t meas_num      = dev_ptr->last_measurement;
-	uint16_t num_iq_bytes = dev_ptr->num_iq_bytes;
-	printf("meas_num=%d num_iq_bytes=%d\n", meas_num, num_iq_bytes);
-#endif
+	CH_LOG_DEBUG("meas_num=%d num_iq_bytes=%d\n", dev_ptr->last_measurement, dev_ptr->num_iq_bytes);
 
 	if (!err) {
 		/* Report specified target from list */
 		time_of_flight = (uint32_t)tgt_list_ptr->targets[target_num].range;
 
-#ifdef CHDRV_DEBUG
-		uint8_t num_valid_targets = tgt_list_ptr->num_valid_targets;
-		uint8_t odr_out_          = dev_ptr->odr_out;
-		uint16_t raw_range        = tgt_list_ptr->targets[0].range;
-		uint16_t amplitude        = tgt_list_ptr->targets[0].amplitude;
-		printf("target list:  num_valid_targets=%d  odr_out=%d  range[0]=%d  amp[0]=%d\n\r", num_valid_targets,
-		       odr_out_, raw_range, amplitude);
-#endif
+		CH_LOG_DEBUG("target list:  num_valid_targets=%d  odr_out=%d  range[0]=%d  amp[0]=%d\n\r",
+		             tgt_list_ptr->num_valid_targets, dev_ptr->odr_out, tgt_list_ptr->targets[0].range,
+		             tgt_list_ptr->targets[0].amplitude);
+
+		CH_LOG_TRACE_START("orig time_of_flight = %ld  pre_rx_cycles = %u   ", time_of_flight, pre_rx_cycles);
 
 		int32_t tof_offset_lsb;
 		if (get_tof_offset_lsb(dev_ptr, &tof_offset_lsb) != RET_OK) {
@@ -364,9 +402,9 @@ uint32_t icu_gpt_algo_get_target_range(ch_dev_t *dev_ptr, uint8_t target_num, ch
 
 		time_of_flight -= tof_offset_lsb;
 
-#ifdef CHDRV_DEBUG
-		printf("adjusted time_of_flight = %lu\n", time_of_flight);
-#endif
+		CH_LOG_TRACE_MSG("adjusted time_of_flight = %lu\n", time_of_flight);
+		CH_LOG_TRACE_END();
+
 		range = ch_common_range_lsb_to_mm(dev_ptr, time_of_flight, range_type);
 	}
 	return range;
@@ -476,17 +514,67 @@ uint8_t icu_gpt_algo_set_data_output(ch_dev_t *dev_ptr, const ch_output_t *outpu
 	return ret_val;
 }
 
-uint8_t ch_meas_set_num_ranges(ch_dev_t *dev_ptr, uint8_t meas_num, uint8_t num_ranges) {
+uint8_t icu_gpt_algo_is_target_in_ringdown(ch_dev_t *dev_ptr) {
+	InvnAlgoRangeFinderOutput algo_out;
+
+	if (!dev_ptr->sensor_connected)
+		return 0;
+
+	/* Get current target list from sensor */
+	uint8_t err = read_target_list(dev_ptr, &algo_out);
+
+	return !err && (algo_out.tL.reserved & 0x01);
+}
+
+uint8_t icu_gpt_display_algo_thresholds(ch_dev_t *dev_ptr) {
+	uint8_t ch_err = RET_OK;
+
+	/* Get threshold values in structure */
+	ch_thresholds_t detect_thresholds;
+
+	ch_log_printf("Detection thresholds:\r\n");
+
+	for (uint8_t meas_num = 0; meas_num < MEAS_QUEUE_MAX_MEAS; meas_num++) {
+		ch_log_printf("  Measurement %u\r\n", meas_num);
+		ch_err = icu_gpt_get_thresholds(dev_ptr, meas_num, &detect_thresholds);
+		if (ch_err) {
+			/*error reading thresholds or thresholds not handled by fw */
+			ch_log_printf("     KO\r\n");
+			goto exit_print_cr;
+		}
+
+		for (int thresh_num = 0; thresh_num < dev_ptr->current_fw->max_num_thresholds; thresh_num++) {
+			uint16_t start_sample = detect_thresholds.threshold[thresh_num].start_sample;
+			uint16_t start_mm     = ch_common_meas_samples_to_mm(dev_ptr, meas_num, start_sample);
+
+			if ((thresh_num == 0) || (start_sample != 0)) { /* unused thresholds have start = 0 */
+				ch_log_printf("     %u\tstart sample: %3u  = %4u mm\tlevel: %u", thresh_num, start_sample, start_mm,
+				              detect_thresholds.threshold[thresh_num].level);
+				if (detect_thresholds.threshold[thresh_num].level == CH_THRESH_LEVEL_HOLDOFF) {
+					ch_log_printf(" (Rx Holdoff)");
+				}
+				ch_log_printf("\r\n");
+			}
+		}
+	}
+
+exit_print_cr:
+	ch_log_printf("\r\n");
+
+	return ch_err;
+}
+
+uint8_t icu_gpt_set_num_ranges(ch_dev_t *dev_ptr, uint8_t meas_num, uint8_t num_ranges) {
 	((InvnAlgoRangeFinderConfig *)(dev_ptr->algo_cfg_ptr))->meas_cfg[meas_num].num_ranges = num_ranges;
 
 	return ch_common_set_algo_config(dev_ptr, dev_ptr->algo_cfg_ptr);
 }
 
-uint8_t ch_meas_get_num_ranges(ch_dev_t *dev_ptr, uint8_t meas_num) {
+uint8_t icu_gpt_get_num_ranges(ch_dev_t *dev_ptr, uint8_t meas_num) {
 	return ((InvnAlgoRangeFinderConfig *)(dev_ptr->algo_cfg_ptr))->meas_cfg[meas_num].num_ranges;
 }
 
-uint8_t ch_meas_set_thresholds(ch_dev_t *dev_ptr, uint8_t meas_num, const ch_thresholds_t *lib_thresh_buf_ptr) {
+uint8_t icu_gpt_set_thresholds(ch_dev_t *dev_ptr, uint8_t meas_num, const ch_thresholds_t *lib_thresh_buf_ptr) {
 	uint8_t ret_val = RET_ERR;
 	InvnAlgoRangeFinderConfig *sens_algo_cfg_addr =
 			(InvnAlgoRangeFinderConfig *)(uintptr_t)dev_ptr->algo_info.algo_cfg_ptr;
@@ -506,7 +594,7 @@ uint8_t ch_meas_set_thresholds(ch_dev_t *dev_ptr, uint8_t meas_num, const ch_thr
 	return ret_val;
 }
 
-uint8_t ch_meas_get_thresholds(ch_dev_t *dev_ptr, uint8_t meas_num, ch_thresholds_t *lib_thresh_buf_ptr) {
+uint8_t icu_gpt_get_thresholds(ch_dev_t *dev_ptr, uint8_t meas_num, ch_thresholds_t *lib_thresh_buf_ptr) {
 	if (!dev_ptr->sensor_connected || (dev_ptr->current_fw->max_num_thresholds != ICU_GPT_NUM_THRESHOLDS) ||
 	    (lib_thresh_buf_ptr == NULL)) {
 		return RET_ERR;
@@ -528,7 +616,7 @@ uint8_t ch_meas_get_thresholds(ch_dev_t *dev_ptr, uint8_t meas_num, ch_threshold
 	return ret_val;
 }
 
-uint8_t ch_meas_set_rx_holdoff(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_t num_samples) {
+uint8_t icu_gpt_set_rx_holdoff(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_t num_samples) {
 	ch_thresholds_t thresholds = {0};
 	uint8_t thresh_num;
 	uint8_t ret_val = RET_OK;
@@ -537,7 +625,7 @@ uint8_t ch_meas_set_rx_holdoff(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_t num
 		return RET_ERR;
 
 	/* Get current threshold settings */
-	ret_val = ch_meas_get_thresholds(dev_ptr, meas_num, &thresholds);
+	ret_val = icu_gpt_get_thresholds(dev_ptr, meas_num, &thresholds);
 	if (ret_val != RET_OK)
 		return ret_val;
 
@@ -584,12 +672,12 @@ uint8_t ch_meas_set_rx_holdoff(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_t num
 	}  // end if (num_samples < thresholds.threshold[1].start_sample)
 
 	/* Write updated threshold values */
-	ret_val = ch_meas_set_thresholds(dev_ptr, meas_num, &thresholds);
+	ret_val = icu_gpt_set_thresholds(dev_ptr, meas_num, &thresholds);
 
 	return ret_val;
 }
 
-uint16_t ch_meas_get_rx_holdoff(ch_dev_t *dev_ptr, uint8_t meas_num) {
+uint16_t icu_gpt_get_rx_holdoff(ch_dev_t *dev_ptr, uint8_t meas_num) {
 	ch_thresholds_t thresholds;
 	uint8_t err;
 	uint16_t rx_holdoff = 0;
@@ -597,7 +685,7 @@ uint16_t ch_meas_get_rx_holdoff(ch_dev_t *dev_ptr, uint8_t meas_num) {
 	if (dev_ptr->current_fw->max_num_thresholds < 2)
 		return RET_ERR;
 
-	err = ch_meas_get_thresholds(dev_ptr, meas_num, &thresholds);
+	err = icu_gpt_get_thresholds(dev_ptr, meas_num, &thresholds);
 	if ((err == RET_OK) && (thresholds.threshold[0].level == CH_THRESH_LEVEL_HOLDOFF)) {
 		/* first threshold ends at start of the second thresh */
 		rx_holdoff = thresholds.threshold[1].start_sample;
@@ -606,32 +694,32 @@ uint16_t ch_meas_get_rx_holdoff(ch_dev_t *dev_ptr, uint8_t meas_num) {
 	return rx_holdoff;
 }
 
-uint8_t ch_meas_set_ringdown_cancel(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_t num_samples) {
+uint8_t icu_gpt_set_ringdown_cancel(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_t num_samples) {
 	((InvnAlgoRangeFinderConfig *)(dev_ptr->algo_cfg_ptr))->meas_cfg[meas_num].ringdown_cancel_samples = num_samples;
 
 	return ch_common_set_algo_config(dev_ptr, dev_ptr->algo_cfg_ptr);
 }
 
-uint16_t ch_meas_get_ringdown_cancel(ch_dev_t *dev_ptr, uint8_t meas_num) {
+uint16_t icu_gpt_get_ringdown_cancel(ch_dev_t *dev_ptr, uint8_t meas_num) {
 	return ((InvnAlgoRangeFinderConfig *)(dev_ptr->algo_cfg_ptr))->meas_cfg[meas_num].ringdown_cancel_samples;
 }
 
-uint8_t ch_meas_set_static_filter(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_t num_samples) {
+uint8_t icu_gpt_set_static_filter(ch_dev_t *dev_ptr, uint8_t meas_num, uint16_t num_samples) {
 	((InvnAlgoRangeFinderConfig *)(dev_ptr->algo_cfg_ptr))->meas_cfg[meas_num].static_target_samples = num_samples;
 
 	return ch_common_set_algo_config(dev_ptr, dev_ptr->algo_cfg_ptr);
 }
 
-uint16_t ch_meas_get_static_filter(ch_dev_t *dev_ptr, uint8_t meas_num) {
+uint16_t icu_gpt_get_static_filter(ch_dev_t *dev_ptr, uint8_t meas_num) {
 	return ((InvnAlgoRangeFinderConfig *)(dev_ptr->algo_cfg_ptr))->meas_cfg[meas_num].static_target_samples;
 }
 
-uint8_t ch_meas_set_filter_update(ch_dev_t *dev_ptr, uint8_t meas_num, uint8_t update_interval) {
+uint8_t icu_gpt_set_filter_update(ch_dev_t *dev_ptr, uint8_t meas_num, uint8_t update_interval) {
 	((InvnAlgoRangeFinderConfig *)(dev_ptr->algo_cfg_ptr))->meas_cfg[meas_num].filter_update_modulo = update_interval;
 
 	return ch_common_set_algo_config(dev_ptr, dev_ptr->algo_cfg_ptr);
 }
 
-uint8_t ch_meas_get_filter_update(ch_dev_t *dev_ptr, uint8_t meas_num) {
+uint8_t icu_gpt_get_filter_update(ch_dev_t *dev_ptr, uint8_t meas_num) {
 	return ((InvnAlgoRangeFinderConfig *)(dev_ptr->algo_cfg_ptr))->meas_cfg[meas_num].filter_update_modulo;
 }

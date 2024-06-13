@@ -35,7 +35,7 @@ void setup() {
     Serial.println(ret);
     while(1);
   } else {
-    ICU.print_informations(Serial);
+    ICU.print_informations();
   }
   // Start ICU in free run mode
   ret = ICU.free_run();
@@ -44,7 +44,7 @@ void setup() {
     Serial.println(ret);
     while(1);
   } else {
-    ICU.print_configuration(Serial);
+    ICU.print_configuration();
     Serial.println("ICU20201 Starting measures: ");
   }
 }

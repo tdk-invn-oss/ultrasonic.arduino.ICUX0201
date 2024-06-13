@@ -27,6 +27,10 @@
 #ifndef ICU_INIT_NO_TXOPT_H_
 #define ICU_INIT_NO_TXOPT_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <invn/soniclib/details/icu.h>
 #include <invn/soniclib/soniclib.h>
@@ -49,4 +53,9 @@ uint16_t get_icu_init_no_txopt_fw_ram_init_size(void);
 const unsigned char *get_ram_icu_init_no_txopt_init_ptr(void);
 
 uint8_t icu_init_no_txopt_init(ch_dev_t *dev_ptr, fw_info_t **fw_info);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* ICU_INIT_NO_TXOPT_H_ */

@@ -16,10 +16,11 @@
  */
 
 #include "ICUX0201.h"
-#include <invn/soniclib/ch_rangefinder.h>
 #include <invn/soniclib/sensor_fw/icu_gpt/icu_gpt.h>
+#include <invn/soniclib/ch_rangefinder.h>
 
 #include "board/chbsp_chirp.h"
+#include <invn/soniclib/sensor_fw/icu_init/icu_init.h>
 
 /* Target detection thresholds
  * These definitions set the sensor's target detection thresholds.  These
@@ -34,29 +35,6 @@
  * These values are used to initialize the chirp_detect_thresholds structure
  * defined in main.c, which is passed to the ch_meas_init() function.
  */
-#define CHIRP_THRESH_0_START (0) /* threshold 0 - must start at sample zero */
-#define CHIRP_THRESH_0_LEVEL (2500)
-
-#define CHIRP_THRESH_1_START (40) /* threshold 1 */
-#define CHIRP_THRESH_1_LEVEL (800)
-
-#define CHIRP_THRESH_2_START (70) /* threshold 2 */
-#define CHIRP_THRESH_2_LEVEL (400)
-
-#define CHIRP_THRESH_3_START (100) /* threshold 3 */
-#define CHIRP_THRESH_3_LEVEL (200)
-
-#define CHIRP_THRESH_4_START (160) /* threshold 4 */
-#define CHIRP_THRESH_4_LEVEL (140)
-
-#define CHIRP_THRESH_5_START (200) /* threshold 5 */
-#define CHIRP_THRESH_5_LEVEL (95)
-
-#define CHIRP_THRESH_6_START (240) /* threshold 6 */
-#define CHIRP_THRESH_6_LEVEL (50)
-
-#define CHIRP_THRESH_7_START (0) /* threshold 7 (not used) */
-#define CHIRP_THRESH_7_LEVEL (0)
 
 /* Configuration of measurement segments
  * The following symbols define the individual transmit and receive segments
@@ -92,75 +70,122 @@ static icu_gpt_algo_config_t gpt_algo_config = {
     .filter_update_interval = 0, /* update filter every sample */
 };
 
-ch_thresholds_t chirp_detect_thresholds = {
+ch_thresholds_t chirp_detect_thresholds_icu10201 = {
     .threshold = {
-        {CHIRP_THRESH_0_START, CHIRP_THRESH_0_LEVEL}, /* threshold 0 */
-        {CHIRP_THRESH_1_START, CHIRP_THRESH_1_LEVEL}, /* threshold 1 */
-        {CHIRP_THRESH_2_START, CHIRP_THRESH_2_LEVEL}, /* threshold 2 */
-        {CHIRP_THRESH_3_START, CHIRP_THRESH_3_LEVEL}, /* threshold 3 */
-        {CHIRP_THRESH_4_START, CHIRP_THRESH_4_LEVEL}, /* threshold 4 */
-        {CHIRP_THRESH_5_START, CHIRP_THRESH_5_LEVEL}, /* threshold 5 */
-        {CHIRP_THRESH_6_START, CHIRP_THRESH_6_LEVEL}, /* threshold 6 */
-        {CHIRP_THRESH_7_START, CHIRP_THRESH_7_LEVEL}, /* threshold 7 */
+        {0, 1600}, /* threshold 0 */
+        {10, 800}, /* threshold 1 */
+        {20, 400}, /* threshold 2 */
+        {25, 200}, /* threshold 3 */
+        {40, 140}, /* threshold 4 */
+        {50, 95}, /* threshold 5 */
+        {60, 50}, /* threshold 6 */
+        {70, 25} /* threshold 7 */
+    }
+};
+ch_thresholds_t chirp_detect_thresholds_icu20201 = {
+    .threshold = {
+        {0, 1000}, /* threshold 0 */
+        {15, 10000}, /* threshold 1 */
+        {20, 3500}, /* threshold 2 */
+        {25, 2500}, /* threshold 3 */
+        {60, 1200}, /* threshold 4 */
+        {130, 600}, /* threshold 5 */
+        {160, 450}, /* threshold 6 */
+        {190, 200} /* threshold 7 */
+    }
+};
+ch_thresholds_t chirp_detect_thresholds_icu30201 = {
+    .threshold = {
+        {0, 1600}, /* threshold 0 */
+        {20, 1200}, /* threshold 1 */
+        {40, 1000}, /* threshold 2 */
+        {50, 800}, /* threshold 3 */
+        {80, 600}, /* threshold 4 */
+        {100, 300}, /* threshold 5 */
+        {120, 150}, /* threshold 6 */
+        {140, 85} /* threshold 7 */
     }
 };
 
 static InvnAlgoRangeFinderConfig gpt_algo_instance;
 
-int ICUX0201_GeneralPurpose::configure_measure(uint16_t range_mm) {
+int ICUX0201_dev_GeneralPurpose::configure_measure(uint16_t range_mm, ch_mode_t mode) {
   int rc = 0;
   uint16_t range_samples;
+  ch_thresholds_t *thresholds;
+  uint16_t part = part_number();
+  if(part == 10201)
+  {
+    thresholds = &chirp_detect_thresholds_icu10201;
+  } else if(part = 30201) {
+    thresholds = &chirp_detect_thresholds_icu30201;    
+  } else {
+    thresholds = &chirp_detect_thresholds_icu20201;
+  }
 
   if (range_mm == 0) {
     /* get max range from sensor maximum range */
     range_mm = get_max_range();
   }
 
-  rc |= ch_meas_init(&chirp_device, 0, &meas_config_gpt, NULL);
-  rc |= ch_meas_add_segment_tx(&chirp_device, 0, CHIRP_TX_SEG_CYCLES,
-                               CHIRP_TX_SEG_PULSE_WIDTH, CHIRP_TX_SEG_PHASE,
-                               CHIRP_TX_SEG_INT_EN);
-  rc |= ch_meas_add_segment_rx(&chirp_device, 0, CHIRP_RX_SEG_0_SAMPLES,
+  rc |= ch_meas_init(this, 0, &meas_config_gpt, NULL);
+  if ((mode != CH_MODE_TRIGGERED_RX_ONLY) && (mode != CH_MODE_CONTINUOUS_RX))
+  {
+    rc |= ch_meas_add_segment_tx(this, 0, CHIRP_TX_SEG_CYCLES,
+                                 CHIRP_TX_SEG_PULSE_WIDTH, CHIRP_TX_SEG_PHASE,
+                                 CHIRP_TX_SEG_INT_EN);
+  } else {
+    rc |= ch_meas_add_segment_count(this, 0, CHIRP_TX_SEG_CYCLES, 0);
+  }
+  rc |= ch_meas_add_segment_rx(this, 0, CHIRP_RX_SEG_0_SAMPLES,
                                CHIRP_RX_SEG_0_GAIN_REDUCE, CHIRP_RX_SEG_0_ATTEN,
                                CHIRP_RX_SEG_0_INT_EN);
   /* convert the range in mm to samples (which is the unit used by the sensor)
    */
-  range_samples = ch_meas_mm_to_samples(&chirp_device, 0, range_mm);
-  rc |= ch_meas_add_segment_rx(&chirp_device, 0, range_samples,
+  range_samples = ch_meas_mm_to_samples(this, 0, range_mm);
+  rc |= ch_meas_add_segment_rx(this, 0, range_samples,
                                CHIRP_RX_SEG_1_GAIN_REDUCE, CHIRP_RX_SEG_1_ATTEN,
                                CHIRP_RX_SEG_1_INT_EN);
-  rc |= ch_meas_write_config(&chirp_device);
-
-  rc |= icu_gpt_algo_init(&chirp_device, &gpt_algo_instance);
-  rc |= icu_gpt_algo_configure(&chirp_device, 0, &gpt_algo_config,
-                               &chirp_detect_thresholds);
-  rc |= ch_set_algo_config(&chirp_device, &gpt_algo_instance);
-  rc |= ch_init_algo(&chirp_device);
+  rc |= ch_meas_write_config(this);
+  if(part == 10201)
+  {
+    /* For Tahoe: tx optimized to reduce ringdown */
+    rc |= ch_meas_optimize(this, NULL, NULL);
+  }
+  rc |= icu_gpt_algo_init(this, &gpt_algo_instance);
+  rc |= icu_gpt_algo_configure(this, 0, &gpt_algo_config,
+                               thresholds);
+  rc |= ch_set_algo_config(this, &gpt_algo_instance);
+  rc |= ch_init_algo(this);
 
   return rc;
 }
 
 // ICUX0201 constructor for spi interface
-ICUX0201_GeneralPurpose::ICUX0201_GeneralPurpose(SPIClass &spi_ref, uint32_t freq,
-                                                 uint8_t cs_id, uint8_t int1_id,
-                                                 uint8_t int2_id,
-                                                 uint8_t mutclk_id)
-    : ICUX0201(spi_ref, freq, cs_id, int1_id, int2_id, mutclk_id) {
-  this->fw_init_func = icu_gpt_init;
+ICUX0201_dev_GeneralPurpose::ICUX0201_dev_GeneralPurpose(SPIClass &spi_ref, uint32_t freq,
+                                                 int cs_id, int int1_id,
+                                                 int int2_id,
+                                                 int mutclk_id)
+    : ICUX0201_dev(spi_ref, freq, cs_id, int1_id, int2_id, mutclk_id) {
+  fw_init_func = icu_gpt_init;
+  /* Needed for tx_opt for Tahoe */
+  fw_sensor_init_func = icu_init_init;
 }
 
-ICUX0201_GeneralPurpose::ICUX0201_GeneralPurpose(SPIClass &spi_ref,
-                                                 uint8_t cs_id, uint8_t int1_id)
-    : ICUX0201(spi_ref, cs_id, int1_id) {
-  this->fw_init_func = icu_gpt_init;
+ICUX0201_dev_GeneralPurpose::ICUX0201_dev_GeneralPurpose(SPIClass &spi_ref,
+                                                 int cs_id, int int1_id)
+    : ICUX0201_dev(spi_ref, cs_id, int1_id) {
+  fw_init_func = icu_gpt_init;
+  /* Needed for tx_opt for Tahoe */
+  fw_sensor_init_func = icu_init_init;
 }
 
-float ICUX0201_GeneralPurpose::get_range(void) {
+float ICUX0201_dev_GeneralPurpose::get_range(void) {
   float range_mm = 0.0;
   uint32_t range_q5;
 
   if (data_ready()) {
-    range_q5 = ch_get_target_range(&chirp_device, 0, CH_RANGE_ECHO_ONE_WAY);
+    range_q5 = ch_get_target_range(this, 0, (ch_get_mode(this) == CH_MODE_TRIGGERED_RX_ONLY)? (CH_RANGE_DIRECT) : (CH_RANGE_ECHO_ONE_WAY));
     if (range_q5 != CH_NO_TARGET) {
       /* Display single detected target (if any) */
       range_mm = range_q5 / 32.0;
@@ -172,3 +197,4 @@ float ICUX0201_GeneralPurpose::get_range(void) {
   }
   return range_mm;
 }
+

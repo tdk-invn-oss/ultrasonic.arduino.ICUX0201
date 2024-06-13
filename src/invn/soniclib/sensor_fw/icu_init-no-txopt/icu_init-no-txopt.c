@@ -25,13 +25,11 @@
 
 static const ch_api_funcs_t api_funcs = {
 		.set_num_samples      = NULL,
-		.set_max_range        = NULL,
 		.get_range            = NULL,
 		.get_amplitude        = NULL,
 		.get_iq_data          = ch_common_get_iq_data,
 		.get_amplitude_data   = NULL,
-		.samples_to_mm        = NULL,
-		.mm_to_samples        = NULL,
+		.mm_to_samples        = ch_common_mm_to_samples,
 		.set_data_output      = NULL,
 		.set_target_interrupt = NULL,
 		.get_target_interrupt = NULL,
