@@ -34,22 +34,27 @@ static void sensor_int_callback(ch_group_t *grp_ptr, uint8_t dev_num,
 // ICUX0201 constructor for spi interface
 ICUX0201::ICUX0201(SPIClass &spi_ref, uint32_t freq, int cs_id,
                    int int1_id, int int2_id, int mutclk_id) {
+
+   /* Initialize group descriptor */
+  ch_group_init(this, 1, 1 , RTC_CAL_PULSE_MS);
   device[0] = new ICUX0201_dev(spi_ref,freq,cs_id,int1_id, int2_id, mutclk_id);
-  num_ports = 1;
 }
 
 // ICUX0201 constructor for spi interface
 ICUX0201::ICUX0201(ICUX0201_dev* dev0,ICUX0201_dev* dev1) {
-  num_ports = 0;
   if(dev0 != NULL)
   {
-    device[0] = dev0;
-    num_ports++;
-  }
-  if(dev1 != NULL)
-  {
-    device[1] = dev1;
-    num_ports++;
+    if(dev1 == NULL)
+    {
+      /* Initialize group descriptor */
+      ch_group_init(this, 1, 1 , RTC_CAL_PULSE_MS);
+      device[0] = dev0;
+    } else {
+      /* Initialize group descriptor */
+      ch_group_init(this, 2, 1 , RTC_CAL_PULSE_MS);
+      device[0] = dev0;
+      device[1] = dev1;
+    }
   }
 }
 
@@ -68,8 +73,6 @@ int ICUX0201::begin() {
   
   board_init(this);
 
-   /* Initialize group descriptor */
-  rc = ch_group_init(this, num_ports, 1 , RTC_CAL_PULSE_MS);
   
   for(int i =0; i< num_ports; i++)
   {
@@ -161,9 +164,10 @@ uint8_t ICUX0201::get_iq_data(int sensor_id, ch_iq_sample_t (&iq_data)[ICU_MAX_N
 
 // ICUX0201 constructor for spi interface
 ICUX0201_GeneralPurpose::ICUX0201_GeneralPurpose(ICUX0201_dev_GeneralPurpose& dev0,ICUX0201_dev_GeneralPurpose& dev1) {
+  /* Initialize group descriptor */
+  ch_group_init(this, 2, 1 , RTC_CAL_PULSE_MS);
   device[0] = &dev0;
   device[1] = &dev1;
-  num_ports = 2;
 }
 
 int ICUX0201_GeneralPurpose::start_trigger(uint16_t range_mm) {

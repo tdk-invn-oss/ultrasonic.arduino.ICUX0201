@@ -117,7 +117,7 @@ int ICUX0201_dev_GeneralPurpose::configure_measure(uint16_t range_mm, ch_mode_t 
   if(part == 10201)
   {
     thresholds = &chirp_detect_thresholds_icu10201;
-  } else if(part = 30201) {
+  } else if(part == 30201) {
     thresholds = &chirp_detect_thresholds_icu30201;    
   } else {
     thresholds = &chirp_detect_thresholds_icu20201;
