@@ -27,6 +27,12 @@ The below wiring description is given for an Arduino Zero board:
 Note: SPI Chip Select can be mapped on any free digital IO, updating the sketches accordingly.
       INT1 interrupt line can be mapped on any free interruptable IO, updating the sketches accordingly.
 
+On Ultrasonic ToF EVK, connect EN_1v8 to 3v3
+
+|3v3|EN_1v8|
+| --- | --- |
+| J1.7 | J1.14 |
+
 The ICU-x0201 sensor module must be connected with a flex to the J3 connector (Device 0 port).
 
 ## Adding a second sensor
