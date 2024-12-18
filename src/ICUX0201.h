@@ -172,7 +172,24 @@ public:
    * @return 0 if successful, 1 if error
    */
   uint8_t get_iq_data(int sensor_id, ch_iq_sample_t (&iq_data)[ICU_MAX_NUM_SAMPLES], uint16_t& nb_samples);
+  /*!
+   * @brief Notify that some sensor iinterrupts have triggered.
+   * @param mask Mask of devices corresponding to triggered interrupts
+   */
+  void set_triggered_interrupts(uint32_t mask);
+  /*!
+   * @brief Notify that some sensor iinterrupts have triggered.
+   * @param mask Mask of devices corresponding to triggered interrupts to be reset
+   */
+   void reset_triggered_interrupts(uint32_t mask);
+  /*!
+   * @brief Get sensor iiterrupts that have triggered.
+   * @return Mask of devices corresponding to triggered interrupts
+   */
+   uint32_t get_triggered_interrupts(void);
 
+protected:
+  uint32_t triggered_interrupts;
 };
 
 /* Chirp ICU General Purpose Transceiver */

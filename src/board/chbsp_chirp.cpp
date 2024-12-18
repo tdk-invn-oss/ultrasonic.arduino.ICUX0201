@@ -26,6 +26,7 @@
 #include "ICUX0201.h"
 
 ch_group_t* sensor_group_ptr = NULL;
+static bool in_interrupt_routine = false;
 
 static void int1_0_handler(void);
 static void int2_0_handler(void);
@@ -33,19 +34,23 @@ static void int1_1_handler(void);
 static void int2_1_handler(void);
 const icux0201_dev_irq_handler* irq_handlers[2][2] = {{int1_0_handler, int2_0_handler},{int1_1_handler, int2_1_handler}};
 
+//void chbsp_print_str(const char *str) {
+//  Serial.println(str);
+//}
+
 static void int1_handler(void)
 {
   ICUX0201* group_ptr = (ICUX0201*)sensor_group_ptr;
-
+  in_interrupt_routine = true;
   for(int i = 0; i < sensor_group_ptr->num_ports; i++)
   {
     ICUX0201_dev* device = group_ptr->get_device(i);
     if(!device->get_int1())
     {
       ch_interrupt(sensor_group_ptr, i);
-      chbsp_int1_interrupt_enable(ch_get_dev_ptr(sensor_group_ptr, i));
     }
   }
+  in_interrupt_routine = false;
 }
 
 static void int2_handler(void)
@@ -126,8 +131,12 @@ extern "C" void chbsp_int1_interrupt_enable(ch_dev_t *dev_ptr)
 
 extern "C" void chbsp_int1_interrupt_disable(ch_dev_t *dev_ptr)
 {
-  ICUX0201_dev* device = (ICUX0201_dev*)dev_ptr;
-  device->disableInterrupt();
+  /* Some boards (eg: nano ble sense) do not support detachInterrupt while being in the interrupt routine */
+    if(!in_interrupt_routine)
+    {
+      ICUX0201_dev* device = (ICUX0201_dev*)dev_ptr;
+      device->disableInterrupt();
+    }
 }
 
 extern "C" void chbsp_set_int2_dir_out(ch_dev_t *dev_ptr)
@@ -170,7 +179,6 @@ extern "C" void chbsp_int2_interrupt_disable(ch_dev_t *dev_ptr)
 extern "C" void chbsp_spi_cs_on(ch_dev_t *dev_ptr)
 {
   ICUX0201_dev* device = (ICUX0201_dev*)dev_ptr;
-  noInterrupts();
   device->spi_begin_transaction();
 }
 
@@ -178,7 +186,6 @@ extern "C" void chbsp_spi_cs_off(ch_dev_t *dev_ptr)
 {
   ICUX0201_dev* device = (ICUX0201_dev*)dev_ptr;
   device->spi_end_transaction();
-  interrupts();
 }
 
 extern "C" int chbsp_spi_write(ch_dev_t *dev_ptr, const uint8_t *data, uint16_t num_bytes)
@@ -257,3 +264,49 @@ extern "C" uint32_t chbsp_timestamp_ms(void)
 {
   return (uint32_t) millis();
 }
+
+void chbsp_event_wait_setup(uint32_t event_mask) {
+  ICUX0201* group_ptr = (ICUX0201*)sensor_group_ptr;
+
+  if(group_ptr != NULL)
+    group_ptr->reset_triggered_interrupts(event_mask); 
+}
+
+void chbsp_event_notify(uint32_t event_mask) {
+  ICUX0201* group_ptr = (ICUX0201*)sensor_group_ptr;
+  if(group_ptr != NULL)
+    group_ptr->set_triggered_interrupts(event_mask);
+}
+
+
+uint8_t chbsp_event_wait(uint16_t time_out_ms, uint32_t event_mask) {
+  ICUX0201* group_ptr = (ICUX0201*)sensor_group_ptr;
+	uint8_t err         = 0;
+	uint32_t start_time = chbsp_timestamp_ms();
+
+  if(group_ptr == NULL)
+    return -1;
+
+	/* Wait for sensor to interrupt */
+	while (!err && ((group_ptr->get_triggered_interrupts() & event_mask) == 0)) {
+		uint32_t new_time = chbsp_timestamp_ms();
+		if (new_time >= (start_time + time_out_ms)) {
+			err = 1;                         // timeout
+			                                 // break;
+		} else if (new_time < start_time) {  // if rollover
+			start_time = new_time;           //  just re-start timeout
+		}
+	}
+
+  /* Disable interrupts outside interrupt routine */
+  for(int i = 0; i < 4; i++)
+  {
+    if(event_mask & (1<<i))
+    {
+      group_ptr->get_device(i)->disableInterrupt(); 
+    }
+  }
+
+	return err;
+}
+

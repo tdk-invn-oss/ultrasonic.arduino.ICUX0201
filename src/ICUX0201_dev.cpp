@@ -423,7 +423,7 @@ void ICUX0201_dev::enableInterrupt(icux0201_dev_irq_handler handler)
   if (!int1_attached) {
     set_int1_dir_in();
 
-    attachInterrupt(digitalPinToInterrupt(int1_pin_id),handler,LOW);
+    attachInterrupt(digitalPinToInterrupt(int1_pin_id),handler,FALLING);
     int1_attached = true;
   }
 }

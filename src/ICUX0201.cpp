@@ -38,6 +38,7 @@ ICUX0201::ICUX0201(SPIClass &spi_ref, uint32_t freq, int cs_id,
    /* Initialize group descriptor */
   ch_group_init(this, 1, 1 , RTC_CAL_PULSE_MS);
   device[0] = new ICUX0201_dev(spi_ref,freq,cs_id,int1_id, int2_id, mutclk_id);
+  triggered_interrupts = 0;
 }
 
 // ICUX0201 constructor for spi interface
@@ -56,6 +57,7 @@ ICUX0201::ICUX0201(ICUX0201_dev* dev0,ICUX0201_dev* dev1) {
       device[1] = dev1;
     }
   }
+  triggered_interrupts = 0;
 }
 
 ICUX0201_dev* ICUX0201::get_device(int id)
@@ -83,6 +85,7 @@ int ICUX0201::begin() {
   if (rc == 0) {
     rc = ch_group_start(this);
   }
+  reset_triggered_interrupts(0xF);
   if (rc == 0) {
     /* Register callback function to be called when Chirp sensor interrupts */
     ch_io_int_callback_set(this, sensor_int_callback);
@@ -108,7 +111,31 @@ int ICUX0201::free_run(uint16_t range_mm, uint16_t interval_ms) {
   return get_device(0)->free_run(range_mm,interval_ms);
 }
 
-bool ICUX0201::data_ready(int sensor_id) { return get_device(sensor_id)->data_ready(); }
+void ICUX0201::set_triggered_interrupts(uint32_t mask) {
+  triggered_interrupts |= mask;
+}
+
+void ICUX0201::reset_triggered_interrupts(uint32_t mask) {
+  triggered_interrupts &= ~mask;
+}
+
+uint32_t ICUX0201::get_triggered_interrupts(void) {
+  return triggered_interrupts;
+}
+
+bool ICUX0201::data_ready(int sensor_id) {
+#ifdef USE_DEFERRED_INTERRUPT_PROCESSING
+  if(triggered_interrupts & (1<<sensor_id))
+  {
+    chdrv_int_callback_deferred(this, sensor_id);
+    reset_triggered_interrupts(1<<sensor_id);
+    chbsp_int1_interrupt_enable(get_device(sensor_id));
+  }
+#endif
+  return get_device(sensor_id)->data_ready();
+}
+
+
 
 uint16_t ICUX0201::part_number(int sensor_id) {
   return get_device(sensor_id)->part_number();
@@ -199,6 +226,7 @@ int ICUX0201_GeneralPurpose::start_trigger(uint16_t range_mm) {
 }
 
 void ICUX0201_GeneralPurpose::trig(void) {
+  reset_triggered_interrupts(0xF);
   return ch_group_trigger(this);
 }
 
